@@ -1,168 +1,119 @@
-# pinchfastmemory
+# PinchFast Memory
 
-Ai memory system
+AI project manager memory and decision microservice.
 
+This service is the "brain" of an AI project manager that bridges founders and
+their engineering teams. It ingests conversations (founder chats, Slack messages
+relayed from the main Django backend), extracts structured facts into a
+per-organization knowledge graph with vector search, and exposes retrieval,
+people, project, and report endpoints that the Django backend calls to give the
+PM agent its memory and decision support.
 
-## Prerequisites
+## Architecture
 
-- `Python 3.9+`
-- `uv`
-- `Postgresql 10+`
-- `just` (optional, for using the justfile commands)
-
-
-## Quick Start
-
-This project includes a justfile with common commands for development.
-
-To see all available commands:
-
-```shell
-just --list
+```
+Django backend (Slack relay, PM agent) ──HTTP (X-API-Key)──> kgmemory
+                                                                │
+   ┌────────────────────────────────────────────────────────────┴───────────┐
+   │ FastAPI API (auth, rate limit, metrics)                                 │
+   │  /memory/ingest   /context/search   /people   /projects   /reports     │
+   └────────┬───────────────────────────────────────────────────────────────┘
+            │ SAQ enqueue
+            ▼
+   ┌────────────────────┐    ┌──────────────────┐    ┌─────────────────────┐
+   │ SAQ Worker         │───>│ OpenAI-compat LLM │───>│ FalkorDB (per org)  │
+   │ ingest / report    │    │ + embeddings      │    │ graph + vector idx  │
+   └────────────────────┘    └──────────────────┘    └─────────────────────┘
+            │                                                ▲
+            ▼                                                │
+   ┌────────────────────┐    ┌──────────────────┐           │
+   │ Redis (queue+rate) │    │ Postgres (orgs,  │           │
+   └────────────────────┘    │  users, API keys)│───────────┘
+                             └──────────────────┘  graph_name = org_<hex>
 ```
 
-### First-time setup
+### Multi-tenancy
+
+Each SaaS organization gets its own FalkorDB graph (`org_<uuid_hex>`), so facts,
+people, and projects are hard-isolated per tenant. API keys (SHA-256 hashed) are
+issued per org and required on every memory/context/people/project/report
+endpoint via the `X-API-Key` header.
+
+### Memory pipeline
+
+1. `POST /memory/ingest` enqueues a SAQ job.
+2. Worker chunks the message, calls the LLM to extract atomic facts
+   (`subject predicate value` + topics/entities/kind/sentiment/due_date).
+3. Facts are embedded, deduplicated (deterministic UUIDv5 + cosine ≥0.92),
+   superseded when single-valued slots change, and written to the org graph
+   with bridge edges to `Topic`, `Entity`, `Person`, `Project`, `Task`,
+   `Episode` nodes plus a vector index on `Fact.embedding`.
+4. `POST /context/search` runs hybrid retrieval: LLM intent → parallel vector
+   ANN + graph traversal + recency → optional LLM associative rerank → rendered
+   prompt context for the PM agent.
+
+### Decision support
+
+- `GET /people/{name}` returns a person's facts and a reliability score derived
+  from commitment / status_update / performance facts they stated.
+- `GET /projects/tasks/{task_id}/recommendations` matches a task's required
+  skills against people's skills and ranks candidates by coverage.
+- `POST /reports/` enqueues an LLM-composed founder report (weekly / status /
+  risk / founder_summary) in the org's preferred language.
+
+## Tech stack
+
+- Python 3.14, FastAPI, Pydantic v2, Tortoise ORM + Aerich (Postgres)
+- SAQ + Redis (async job queue), FalkorDB (graph + vector), OpenAI-compatible
+  LLM/embeddings, Prometheus metrics, structlog/rich logging
+- uv package manager, ruff + mypy, pytest, Docker + docker-compose
+
+## Quick start
 
 ```shell
-# Install dependencies and set up the project
-just setup
+just setup                 # uv sync, copy .env, migrate
+just work                  # api + worker + redis + falkordb
+# or
+just compose-up            # full stack via docker compose
 ```
 
-### Running the development server
+Create an org and an API key (auth via fastapi-users JWT):
 
 ```shell
-# Start the development server
-just server
-
-# Or run all services (server, worker, redis) together
-just work
+just create-user           # admin user
+# POST /orgs/ then POST /orgs/{id}/api-keys  ->  returns raw key
 ```
 
-### Other common commands
+Use the raw key on subsequent calls:
 
 ```shell
-# Run tests
-just test
-
-# Open an interactive console
-just console
-
-# Create a new user
-just create-user
-
-# See project information
-just info
+curl -H "X-API-Key: pfm_..." -H "Content-Type: application/json" \
+  -d '{"message":"I will ship the auth module by Friday","speaker":"Dave","speaker_role":"engineer"}' \
+  http://localhost:8000/memory/ingest
 ```
 
+## Project layout
 
-## Development
-
-### `.env` example
-
-```shell
-DEBUG=True
-SERVER_HOST=http://localhost:8000
-SECRET_KEY=qwtqwubYA0pN1GMmKsFKHMw_WCbboJvdTAgM9Fq-UyM
-SMTP_PORT=1025
-SMTP_HOST=localhost
-SMTP_TLS=False
-BACKEND_CORS_ORIGINS=["http://localhost"]
-DATABASE_URI=postgres://postgres:password@localhost/knowledgegraph for pinchfast
-DEFAULT_FROM_EMAIL=pinchfastmemory@gmail.com
-REDIS_URL=redis://localhost
-FIRST_SUPERUSER_EMAIL=admin@mail.com
-FIRST_SUPERUSER_PASSWORD=admin
+```
+kgmemory/
+  core/         config, logger, metrics, redis, rate_limit, auth (fastapi-users)
+  db/           Tortoise config + base models
+  orgs/         SaaS orgs + API keys (Postgres) + X-API-Key auth dependency
+  graph/        FalkorDB client, per-org graph selection, schema/indexes
+  llm/          OpenAI-compatible LLM + embeddings clients, lenient JSON, prompts
+  memory/       fact schema, extraction, dedup/supersede, ingest, repository, routes, tasks
+  contextengine/ hybrid retrieval (intent, dense, traversal, rerank) + routes
+  people/       person profiles, skills, reliability scoring + routes
+  projects/     project/task tracking, skill-match assignment + routes
+  reports/      LLM report generation + async tasks + routes
+  users/        fastapi-users (template, kept)
+  services/     email (template, kept)
+  main.py       FastAPI app wiring (CORS, metrics, lifespan, routers)
+  worker.py     SAQ worker settings
+  health.py     /health and /health/ready (Postgres, Redis, FalkorDB)
 ```
 
-### Database setup
+## Configuration
 
-Create your first migration
-
-```shell
-aerich init-db
-```
-
-Adding new migrations.
-
-```shell
-aerich migrate --name <migration_name>
-```
-
-Upgrading the database when new migrations are created.
-
-```shell
-aerich upgrade
-```
-
-### Run the fastapi app
-
-Using the new FastAPI CLI (recommended):
-
-```shell
-# Run in development mode with auto-reload
-python -m app dev
-
-# Or using the shorthand
-fastapi dev
-
-# Run all services (server, worker, redis) together
-python -m app work
-```
-
-Using the traditional method (still supported):
-
-```shell
-python manage.py work
-```
-
-### CLI Commands
-
-The project includes a comprehensive CLI built with Typer, now integrated with the official FastAPI CLI. 
-The CLI is available through both the new `python -m app` interface and the legacy `python manage.py` interface.
-
-**Available via FastAPI CLI integration:**
-- `dev` - Run the development server with auto-reload (powered by FastAPI CLI)
-- `run` - Run the production server (powered by FastAPI CLI)
-
-**Custom project commands:**
-- `work` - Run all development services (server, worker, redis) in one command
-- `run-server` - Run the development server (uvicorn)
-- `run-prod-server` - Run the production server (gunicorn)
-- `create-user` - Interactively create a new user
-- `start-app` - Create a new FastAPI component (similar to Django's startapp)
-- `migrate-db` - Apply database migrations
-- `shell` - Open an interactive IPython shell with auto-imports
-- `run-worker` - Run the SAQ worker process
-- `run-mailserver` - Run a test SMTP server for development
-- `secret-key` - Generate a secure secret key
-- `info` - Show project health and settings
-
-To see all available commands:
-
-```shell
-# New way (recommended)
-python -m app --help
-
-# Legacy way (still works)
-python manage.py --help
-```
-
-Example usage:
-
-```shell
-# Start development server with FastAPI CLI
-python -m app dev
-
-# Create a new user
-python -m app create-user
-
-# Generate a secret key
-python -m app secret-key
-
-# Run all services together
-python -m app work
-```
-
-## Credits
-
-This package was created with [Cookiecutter](https://github.com/cookiecutter/cookiecutter) and the [cookiecutter-fastapi](https://github.com/tobi-de/cookiecutter-fastapi) project template.
+See `.env.template` for all options. Key groups: LLM, embeddings, FalkorDB,
+ingestion tuning, context engine weights, rate limiting, SES email.

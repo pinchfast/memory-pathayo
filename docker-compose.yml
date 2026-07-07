@@ -1,0 +1,81 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: kgmemory
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  falkordb:
+    image: falkordb/falkordb:latest
+    ports:
+      - "6380:6379"
+    volumes:
+      - falkordb_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: .
+    command: python manage.py run-server --host 0.0.0.0 --port 80
+    env_file: .env
+    environment:
+      DATABASE_URI: postgres://postgres:postgres@postgres:5432/kgmemory
+      REDIS_URL: redis://redis:6379/0
+      FALKORDB_HOST: falkordb
+      FALKORDB_PORT: 6379
+    ports:
+      - "8000:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      falkordb:
+        condition: service_healthy
+
+  worker:
+    build: .
+    command: python -m saq kgmemory.worker.settings --web
+    env_file: .env
+    environment:
+      DATABASE_URI: postgres://postgres:postgres@postgres:5432/kgmemory
+      REDIS_URL: redis://redis:6379/0
+      FALKORDB_HOST: falkordb
+      FALKORDB_PORT: 6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      falkordb:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:
+  falkordb_data:

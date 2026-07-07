@@ -1,30 +1,26 @@
-FROM python:3.10 as requirements-stage
+FROM python:3.14-slim AS builder
 
 WORKDIR /tmp
 
-RUN pip install poetry
+RUN pip install --no-cache-dir uv
 
-COPY ./pyproject.toml ./poetry.lock* /tmp/
+COPY pyproject.toml ./
+RUN uv export --no-dev --no-hashes -o requirements.txt
 
-RUN poetry export -f requirements.txt --output requirements.txt --without-hashes
-
-FROM python:3.10-alpine
+FROM python:3.14-slim
 
 WORKDIR /code
 
-RUN apk update \
-    && apk add --virtual build-deps build-base \
-    && apk add --no-cache libffi-dev \
-    && pip install --upgrade pip \
-    && python --version
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential libffi-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir --upgrade pip
 
-COPY --from=requirements-stage /tmp/requirements.txt /code/requirements.txt
-
-RUN pip install --no-cache-dir --upgrade -r /code/requirements.txt
+COPY --from=builder /tmp/requirements.txt /code/requirements.txt
+RUN pip install --no-cache-dir -r /code/requirements.txt
 
 COPY . /code
 
 EXPOSE 80
 
 CMD ["python", "manage.py", "run-prod-server"]
-

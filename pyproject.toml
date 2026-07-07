@@ -5,7 +5,8 @@ authors = [
 dependencies = [
     "fastapi>=0.109.2",
     "fastapi-cli>=0.0.2",
-    "uvicorn>=0.21.1",
+    "uvicorn[standard]>=0.21.1",
+    "gunicorn>=21.0.0",
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
     "email-validator>=2.0.0",
@@ -23,29 +24,35 @@ dependencies = [
     "httpx>=0.23.3",
     "aioaws>=0.14",
     "honcho>=1.1.0",
+    "openai>=1.30.0",
+    "falkordb>=1.0.0",
+    "redis>=5.0.0",
+    "prometheus-client>=0.20.0",
 ]
-name = "knowledgegraph for pinchfast"
+name = "kgmemory"
 version = "0.1.0"
-description = "Ai memory system"
+description = "AI project manager memory and decision microservice"
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 
 [project.optional-dependencies]
 
 
 dev = [
     "pytest>=7.2.2",
+    "pytest-asyncio>=0.23.0",
     "factory-boy>=3.2.1",
     "pre-commit>=3.1.1",
     "mypy>=1.1.1",
     "ruff>=0.1.0",
     "ipython>=8.11.0",
     "aiosmtpd>=1.4.4.post2",
+    "respx>=0.21.0",
 ]
 
 [tool.aerich]
-tortoise_orm = "knowledgegraph for pinchfast.db.config.TORTOISE_ORM"
+tortoise_orm = "kgmemory.db.config.TORTOISE_ORM"
 location = "./migrations"
 src_folder = "./."
 [tool.isort]
@@ -61,6 +68,8 @@ ignore_missing_imports = true
 
 [tool.ruff]
 line-length = 120
+
+[tool.ruff.lint]
 select = [
     "E",  # https://github.com/charliermarsh/ruff#pycodestylet
     "F",  # https://github.com/charliermarsh/ruff#pyflakes
@@ -71,11 +80,21 @@ select = [
     "B",  # https://github.com/charliermarsh/ruff#flake8-bugbear
     "T",  # https://github.com/charliermarsh/ruff#flake8-print
 ]
+ignore = [
+    "B008",  # Depends() in defaults is idiomatic FastAPI
+    "B905",  # zip strict= is over-strict for equal-length iterables
+    "N802",  # PATHS property name is intentional API
+    "C901",  # complexity limits are too strict for parsers
+]
+
+[tool.ruff.lint.per-file-ignores]
+"kgmemory/__main__.py" = ["E402", "S607", "T201", "B904"]
+"tests/*" = ["S101"]
 
 [build-system]
 requires = ["uv_build>=0.9.13,<0.10.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
-module-name = "knowledgegraph for pinchfast"
+module-name = "kgmemory"
 module-root = ""
