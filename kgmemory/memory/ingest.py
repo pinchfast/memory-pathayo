@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import datetime, timezone
 
@@ -71,4 +72,17 @@ async def ingest_message(graph_name: str, payload: IngestRequest) -> dict:
         "failed_chunks": failed_chunks,
     }
     logger.info(f"Ingested message into {graph_name}: {result}")
+
+    # Harness loop: fire-and-forget state inference so the PM's model of reality
+    # stays in sync after every conversation. Never blocks the ingest response.
+    asyncio.create_task(_safe_infer_state(graph_name))
     return result
+
+
+async def _safe_infer_state(graph_name: str) -> None:
+    try:
+        from kgmemory.state.inference import infer_and_snapshot_state
+
+        await infer_and_snapshot_state(graph_name)
+    except Exception:
+        logger.exception(f"Fire-and-forget state inference failed for {graph_name}")

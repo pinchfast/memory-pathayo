@@ -158,4 +158,6 @@ class SearchResponse(BaseModel):
     facts: list[FactRead]
     associations: dict[str, dict]
     intent: dict
+    project_states: list[dict] = Field(default_factory=list)
+    person_states: list[dict] = Field(default_factory=list)
     elapsed_ms: int

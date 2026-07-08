@@ -15,6 +15,7 @@ from .orgs.routes import router as orgs_router
 from .people.routes import router as people_router
 from .projects.routes import router as projects_router
 from .reports.routes import router as reports_router
+from .state.routes import router as state_router
 from .users.routes import router as users_router
 
 
@@ -51,6 +52,7 @@ def get_application() -> FastAPI:
     _app.include_router(people_router)
     _app.include_router(projects_router)
     _app.include_router(reports_router)
+    _app.include_router(state_router)
     _app.include_router(health_router)
     _app.include_router(metrics_router)
     register_db(_app)

@@ -22,5 +22,7 @@ async def search(payload: SearchRequest, org: Organization = Depends(get_current
         facts=result["facts"],
         associations=result["associations"],
         intent=result["intent"],
+        project_states=result.get("project_states", []),
+        person_states=result.get("person_states", []),
         elapsed_ms=result["elapsed_ms"],
     )
