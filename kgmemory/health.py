@@ -16,6 +16,8 @@ class HealthResponse(BaseModel):
     database_online: bool = True
     redis_worker_online: bool = True
     graph_online: bool = True
+    llm_online: bool = True
+    embedding_online: bool = True
 
 
 class ReadinessResponse(BaseModel):
@@ -23,6 +25,8 @@ class ReadinessResponse(BaseModel):
     database_online: bool
     redis_worker_online: bool
     graph_online: bool
+    llm_online: bool
+    embedding_online: bool
 
 
 @router.get(
@@ -49,6 +53,25 @@ async def check_health(response: Response):
     except Exception:
         health.graph_online = False
         logger.exception("FalkorDB connection failed")
+    # LLM API check (lightweight — just verify the client can connect)
+    try:
+        from kgmemory.llm.embeddings import get_embedder
+        embedder = get_embedder()
+        if embedder._fallback_active:
+            health.embedding_online = False
+            logger.warning("Embedding API is in fallback mode")
+        else:
+            await embedder.embed("health check")
+    except Exception:
+        health.embedding_online = False
+        logger.warning("Embedding API health check failed")
+    # LLM check — only if embedding is up (they often share the same endpoint)
+    try:
+        from kgmemory.llm.client import get_llm
+        await get_llm().complete("Reply with: ok", kind="health", max_tokens=5)
+    except Exception:
+        health.llm_online = False
+        logger.warning("LLM API health check failed")
     if not all(v for k, v in health.model_dump().items() if k != "status"):
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         health.status = "degraded"
@@ -72,4 +95,6 @@ async def check_readiness(response: Response):
         database_online=health.database_online,
         redis_worker_online=health.redis_worker_online,
         graph_online=health.graph_online,
+        llm_online=health.llm_online,
+        embedding_online=health.embedding_online,
     )

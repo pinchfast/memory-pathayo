@@ -78,6 +78,7 @@ async def _find_overdue_commitments(store: GraphStore) -> list[dict[str, Any]]:
         "MATCH (f:Fact) "
         "WHERE f.temporal_status = 'current' AND f.fact_kind = 'commitment' "
         "AND f.due_date IS NOT NULL AND f.due_date < $grace "
+        "AND NOT EXISTS { MATCH (f)-[:FULFILLED_BY]->(:Fact) } "
         "OPTIONAL MATCH (c:Fact) "
         "WHERE c.temporal_status = 'current' AND c.fact_kind = 'status_update' "
         "AND c.subject = f.subject AND c.value CONTAINS f.value "
@@ -108,6 +109,7 @@ async def _find_silent_engineers(store: GraphStore) -> list[dict[str, Any]]:
     rows = await store.query(
         "MATCH (p:Person)-[:STATED]->(c:Fact) "
         "WHERE c.temporal_status = 'current' AND c.fact_kind = 'commitment' "
+        "AND NOT EXISTS { MATCH (c)-[:FULFILLED_BY]->(:Fact) } "
         "AND NOT EXISTS { "
         "  MATCH (p)-[:STATED]->(recent:Fact) "
         "  WHERE recent.temporal_status = 'current' AND recent.valid_from >= $cutoff "

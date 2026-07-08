@@ -60,9 +60,11 @@ async def ingest_message(graph_name: str, payload: IngestRequest) -> dict:
         await repo.link_bridges(facts)
         relations_created = await repo.link_relations(relations)
         contradictions = await repo.detect_contradictions(facts)
+        commitments_fulfilled = await repo.link_commitment_fulfillment(facts)
     else:
         invalidated = created = relations_created = 0
         contradictions = []
+        commitments_fulfilled = 0
 
     FACTS_INGESTED.labels(graph_name).inc(created)
     result = {
@@ -72,6 +74,7 @@ async def ingest_message(graph_name: str, payload: IngestRequest) -> dict:
         "facts_invalidated": invalidated,
         "relations_created": relations_created,
         "contradictions": contradictions,
+        "commitments_fulfilled": commitments_fulfilled,
         "failed_chunks": failed_chunks,
     }
     logger.info(f"Ingested message into {graph_name}: {result}")
@@ -157,6 +160,7 @@ async def ingest_batch(graph_name: str, messages: list[IngestRequest]) -> dict:
         await repo.link_bridges(all_facts)
         total_relations = await repo.link_relations(all_relations)
         contradictions = await repo.detect_contradictions(all_facts)
+        commitments_fulfilled = await repo.link_commitment_fulfillment(all_facts)
 
     FACTS_INGESTED.labels(graph_name).inc(total_created)
 
@@ -170,6 +174,7 @@ async def ingest_batch(graph_name: str, messages: list[IngestRequest]) -> dict:
         "facts_invalidated": total_invalidated,
         "relations_created": total_relations,
         "contradictions": contradictions,
+        "commitments_fulfilled": commitments_fulfilled,
         "failed_chunks": total_failed_chunks,
     }
     logger.info(f"Batch ingested into {graph_name}: {result}")

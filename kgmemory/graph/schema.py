@@ -21,6 +21,9 @@ NODE_INDEXES: dict[str, list[str]] = {
     "Episode": ["episode_id", "channel"],
     "Report": ["report_id", "created_at"],
     "StateSnapshot": ["snapshot_id", "kind", "inferred_at", "project", "person"],
+    "Alert": ["alert_id", "status", "created_at", "alert_type", "severity"],
+    "Action": ["action_id", "status", "created_at", "urgency"],
+    "DecisionHistory": ["decision_id", "created_at", "confidence", "outcome"],
 }
 
 

@@ -1,13 +1,14 @@
 """Tests for contradiction detection, overdue computation, intent-aware ranking,
 check-in reasoning, confidence scoring, source reliability weighting,
-embedding fallback, and escalation logic."""
+embedding fallback, escalation logic, commitment matching, and temporal reasoning."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from kgmemory.contextengine.engine import _compute_is_overdue, _dense_rank
+from kgmemory.contextengine.engine import _compute_is_overdue, _days_between, _dense_rank
 from kgmemory.llm.embeddings import EmbeddingClient
-from kgmemory.memory.repository import _COMPLETION_WORDS, _PROGRESS_WORDS
+from kgmemory.memory.repository import FactRepository, _COMPLETION_WORDS, _PROGRESS_WORDS
+from kgmemory.memory.schemas import Fact, FactKind, SpeakerRole
 from kgmemory.monitor.monitor import _escalate_severity
 from kgmemory.state.checkin import _derive_check_in_reason, _days_since
 from kgmemory.state.decision import _compute_confidence
@@ -411,3 +412,148 @@ def test_escalate_severity_low_to_medium():
 
 def test_escalate_severity_critical_stays():
     assert _escalate_severity("critical") == "critical"
+
+
+# --- Commitment fulfillment matching ---
+
+
+def test_completion_match_exact():
+    """Exact word overlap between commitment and completion."""
+    assert FactRepository._is_completion_match("ship auth module", "shipped auth module")
+
+
+def test_completion_match_partial():
+    """40% word overlap is enough for a match."""
+    assert FactRepository._is_completion_match("ship the auth module by friday", "shipped auth module")
+
+
+def test_completion_match_no_overlap():
+    """Completely different text should not match."""
+    assert not FactRepository._is_completion_match("ship auth module", "deployed payment gateway")
+
+
+def test_completion_match_empty_commitment():
+    """Empty commitment value should match (no text to compare)."""
+    assert FactRepository._is_completion_match("", "completed everything")
+
+
+# --- Per-fact confidence scoring ---
+
+
+def test_fact_confidence_founder_high():
+    """Founder statements should have higher confidence than unknown sources."""
+    fact = Fact(
+        subject="company", predicate="decided", value="We will use PostgreSQL for the database",
+        fact_kind=FactKind.DECISION, speaker="Alice", speaker_role=SpeakerRole.FOUNDER,
+        entities=["postgresql"], sentiment="neutral", temporal_hint="current",
+        evidence_quote="We will use PostgreSQL",
+    )
+    confidence = fact.compute_confidence()
+    assert confidence > 0.7
+
+
+def test_fact_confidence_vague_lower_than_specific():
+    """Vague language should produce lower confidence than specific language."""
+    vague = Fact(
+        subject="dave", predicate="committed to", value="maybe ship it soon",
+        fact_kind=FactKind.COMMITMENT, speaker="Dave", speaker_role=SpeakerRole.ENGINEER,
+        sentiment="neutral", temporal_hint="future",
+    )
+    specific = Fact(
+        subject="dave", predicate="committed to", value="ship auth module by 2026-07-15",
+        fact_kind=FactKind.COMMITMENT, speaker="Dave", speaker_role=SpeakerRole.ENGINEER,
+        sentiment="neutral", temporal_hint="future", due_date="2026-07-15",
+        entities=["auth"], evidence_quote="ship auth module by 2026-07-15",
+    )
+    assert vague.compute_confidence() < specific.compute_confidence()
+
+
+def test_fact_confidence_specific_high():
+    """Specific values with numbers and dates should have higher confidence."""
+    fact = Fact(
+        subject="dave", predicate="completed", value="merged PR #123 with 450 lines of tests",
+        fact_kind=FactKind.STATUS_UPDATE, speaker="Dave", speaker_role=SpeakerRole.ENGINEER,
+        entities=["pr_123"], sentiment="neutral", temporal_hint="current",
+        evidence_quote="merged PR #123 with 450 lines of tests",
+        due_date="2026-07-08",
+    )
+    confidence = fact.compute_confidence()
+    assert confidence > 0.7
+
+
+def test_fact_confidence_engineer_moderate():
+    """Engineer statements should have moderate confidence."""
+    fact = Fact(
+        subject="dave", predicate="is skilled in", value="Python",
+        fact_kind=FactKind.SKILL, speaker="Dave", speaker_role=SpeakerRole.ENGINEER,
+        sentiment="neutral", temporal_hint="current",
+    )
+    confidence = fact.compute_confidence()
+    assert 0.5 < confidence < 0.8
+
+
+def test_fact_confidence_in_range():
+    """Confidence should always be in [0, 1]."""
+    for role in SpeakerRole:
+        fact = Fact(
+            subject="x", predicate="is", value="maybe possibly eventually soon",
+            fact_kind=FactKind.FACT, speaker_role=role, sentiment="negative",
+        )
+        confidence = fact.compute_confidence()
+        assert 0.0 <= confidence <= 1.0
+
+
+# --- Temporal reasoning ---
+
+
+def test_days_between_past():
+    now = datetime.now(timezone.utc)
+    past = (now - timedelta(days=5)).isoformat()
+    assert _days_between(past, now) == 5
+
+
+def test_days_between_future():
+    now = datetime.now(timezone.utc)
+    future = (now + timedelta(days=3)).isoformat()
+    # Should return 0 (not negative)
+    assert _days_between(future, now) == 0
+
+
+def test_days_between_none():
+    assert _days_between(None, datetime.now(timezone.utc)) is None
+
+
+def test_days_between_invalid():
+    assert _days_between("not-a-date", datetime.now(timezone.utc)) is None
+
+
+# --- Dense rank with confidence ---
+
+
+def test_dense_rank_confidence_boost():
+    """High-confidence facts should rank higher than low-confidence ones."""
+    facts = [
+        {
+            "fact_id": "f1",
+            "fact_kind": "status_update",
+            "topics": ["api"],
+            "similarity": 0.5,
+            "valid_from": datetime.now(timezone.utc).isoformat(),
+            "is_overdue": False,
+            "speaker_role": "engineer",
+            "confidence": 0.9,
+        },
+        {
+            "fact_id": "f2",
+            "fact_kind": "status_update",
+            "topics": ["api"],
+            "similarity": 0.5,
+            "valid_from": datetime.now(timezone.utc).isoformat(),
+            "is_overdue": False,
+            "speaker_role": "engineer",
+            "confidence": 0.2,
+        },
+    ]
+    ranked = _dense_rank(facts, topics=["api"])
+    assert ranked[0]["fact_id"] == "f1"
+    assert ranked[0]["dense_score"] > ranked[1]["dense_score"]

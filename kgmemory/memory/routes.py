@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 
 from kgmemory.core.openapi import ORG_PROTECTED_RESPONSES
 from kgmemory.graph.client import get_org_store
@@ -54,9 +54,23 @@ INGEST_RESPONSE_EXAMPLE = {"request_id": "a1b2c3d4e5f6", "status": "queued"}
     },
     openapi_extra={"security": [{"OrgAPIKey": []}]},
 )
-async def ingest(payload: IngestRequest, org: Organization = Depends(get_current_org)):
+async def ingest(
+    payload: IngestRequest,
+    org: Organization = Depends(get_current_org),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key", max_length=128),
+):
+    # Idempotency: if a key is provided, check for a prior result
+    if idempotency_key:
+        cached = await get_status(f"idem:{org.id}:{idempotency_key}")
+        if cached:
+            return IngestAccepted(request_id=cached["request_id"])
+
     request_id = uuid.uuid4().hex
     await set_status(request_id, "queued")
+    # Store idempotency mapping so retries return the same request_id
+    if idempotency_key:
+        from kgmemory.memory.tasks import set_status as _set_status
+        await _set_status(f"idem:{org.id}:{idempotency_key}", "queued", result={"request_id": request_id})
     await queue.enqueue(
         "ingest_conversation",
         request_id=request_id,

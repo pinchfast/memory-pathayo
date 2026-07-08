@@ -119,13 +119,17 @@ def _dense_rank(
         # A founder's commitment is a directive; an engineer's is a promise.
         role = (fact.get("speaker_role") or "").lower()
         source_boost = 0.08 if role == "founder" else 0.03 if role == "engineer" else 0.0
+        # Per-fact confidence: facts with evidence, specificity, and neutral sentiment
+        # score higher. Vague facts ("maybe", "soon") score lower.
+        fact_confidence = float(fact.get("confidence") or 0.5)
         fact["dense_score"] = (
-            0.6 * similarity
-            + 0.1 * overlap
-            + 0.12 * recency_score(fact.get("valid_from"))
+            0.5 * similarity
+            + 0.08 * overlap
+            + 0.10 * recency_score(fact.get("valid_from"))
             + kind_boost
             + overdue_boost
             + source_boost
+            + 0.12 * fact_confidence
         )
     return sorted(facts, key=lambda f: f["dense_score"], reverse=True)
 
@@ -155,13 +159,22 @@ def _render(
     project_states: list[dict[str, Any]] | None = None,
     person_states: list[dict[str, Any]] | None = None,
 ) -> str:
+    now = datetime.now(timezone.utc)
     sections: list[str] = []
     if facts:
         lines = ["RELEVANT COMPANY MEMORY:"]
         for fact in facts:
             topics = ",".join(fact.get("topics") or [])
-            overdue_tag = " [OVERDUE]" if fact.get("is_overdue") else ""
-            line = f"- [{fact['fact_kind']}|{topics}]{overdue_tag} {fact['subject']} {fact['predicate']} {fact['value']}"
+            # Temporal reasoning: compute days overdue
+            overdue_tag = ""
+            if fact.get("is_overdue"):
+                days_overdue = _days_between(fact.get("due_date"), now)
+                overdue_tag = f" [OVERDUE by {days_overdue} days]" if days_overdue is not None else " [OVERDUE]"
+            confidence_tag = ""
+            fc = fact.get("confidence")
+            if fc is not None and float(fc) < 0.4:
+                confidence_tag = " [LOW CONFIDENCE]"
+            line = f"- [{fact['fact_kind']}|{topics}]{overdue_tag}{confidence_tag} {fact['subject']} {fact['predicate']} {fact['value']}"
             if fact.get("speaker"):
                 line += f" (from {fact['speaker']}"
                 line += f", {fact['valid_from'][:10]})" if fact.get("valid_from") else ")"
@@ -179,8 +192,10 @@ def _render(
         lines = ["CURRENT PROJECT STATES:"]
         for state in project_states:
             signals = "; ".join(state.get("risk_signals") or []) or "none"
+            days_inactive = _days_between(state.get("last_activity"), now)
+            inactivity_tag = f", inactive {days_inactive}d" if days_inactive and days_inactive > 2 else ""
             lines.append(
-                f"- {state['project']} [{state['health']}, score {state['health_score']}]: "
+                f"- {state['project']} [{state['health']}, score {state['health_score']}{inactivity_tag}]: "
                 f"{state.get('summary') or 'no summary'} (risks: {signals})"
             )
         sections.append("\n".join(lines))
@@ -189,10 +204,25 @@ def _render(
         lines = ["CURRENT PERSON CREDIBILITY:"]
         for state in person_states:
             signals = "; ".join(state.get("risk_signals") or []) or "none"
+            days_since = state.get("days_since_last_seen")
+            silence_tag = f", last seen {days_since}d ago" if days_since is not None else ""
             lines.append(
-                f"- {state['person']} [{state['credibility']}, score {state['credibility_score']}]: "
+                f"- {state['person']} [{state['credibility']}, score {state['credibility_score']}{silence_tag}]: "
                 f"{state.get('summary') or 'no summary'} (risks: {signals})"
             )
         sections.append("\n".join(lines))
 
     return "\n\n".join(sections)
+
+
+def _days_between(date_str: str | None, now: datetime) -> int | None:
+    """Compute days between a date string and now."""
+    if not date_str:
+        return None
+    try:
+        moment = datetime.fromisoformat(date_str)
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return None
+    return max(0, (now - moment).days)

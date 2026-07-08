@@ -100,16 +100,24 @@ async def recommend_assignees(store: GraphStore, task_id: str) -> list[dict[str,
     required = [s.lower() for s in rows[0][0] or []]
     if not required:
         return []
+    # Get people with their skills AND current open task count for workload balancing
     people = await store.query(
-        "MATCH (p:Person) RETURN p.name, p.skills, p.role"
+        "MATCH (p:Person) "
+        "OPTIONAL MATCH (p)-[:ASSIGNED_TO]->(t:Task) WHERE t.status <> 'done' "
+        "WITH p, count(t) AS open_tasks "
+        "RETURN p.name, p.skills, p.role, open_tasks"
     )
     recommendations = []
-    for name, skills, role in people:
+    for name, skills, role, open_tasks in people:
         skill_set = {s.lower() for s in skills or []}
         matched = set(required) & skill_set
         if not matched:
             continue
         coverage = len(matched) / len(required)
+        open_task_count = int(open_tasks or 0)
+        # Workload-adjusted score: coverage divided by (1 + open_tasks)
+        # This balances skill match against current workload
+        workload_score = coverage / (1 + open_task_count * 0.3)
         recommendations.append(
             {
                 "person": name,
@@ -117,9 +125,12 @@ async def recommend_assignees(store: GraphStore, task_id: str) -> list[dict[str,
                 "matched_skills": sorted(matched),
                 "missing_skills": sorted(set(required) - skill_set),
                 "coverage": round(coverage, 2),
+                "open_task_count": open_task_count,
+                "workload_score": round(workload_score, 2),
             }
         )
-    recommendations.sort(key=lambda r: r["coverage"], reverse=True)
+    # Sort by workload-adjusted score (not just coverage)
+    recommendations.sort(key=lambda r: r["workload_score"], reverse=True)
     return recommendations
 
 

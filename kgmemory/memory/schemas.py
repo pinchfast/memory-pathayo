@@ -79,6 +79,7 @@ class Fact(BaseModel):
     valid_from: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     valid_until: datetime | None = None
     superseded_by: str | None = None
+    confidence: float = 0.5
     embedding: list[float] | None = None
 
     def model_post_init(self, __context) -> None:
@@ -94,6 +95,72 @@ class Fact(BaseModel):
         if self.entities:
             parts.append(f"entities: {', '.join(self.entities)}")
         return ". ".join(parts)
+
+    def compute_confidence(self) -> float:
+        """Compute a per-fact confidence score (0.0–1.0) based on:
+        - Speaker role: founder statements are more authoritative
+        - Specificity: specific values with numbers/dates are more reliable
+        - Evidence: having an evidence_quote increases confidence
+        - Sentiment: neutral facts are more objective
+        - Temporal hint: 'current' facts are more actionable than 'planned'
+        """
+        score = 0.5
+
+        # Speaker role weighting
+        role_scores = {
+            SpeakerRole.FOUNDER: 0.15,
+            SpeakerRole.MANAGER: 0.10,
+            SpeakerRole.ENGINEER: 0.08,
+            SpeakerRole.MARKETER: 0.05,
+            SpeakerRole.ASSISTANT: 0.03,
+            SpeakerRole.OTHER: 0.0,
+        }
+        score += role_scores.get(self.speaker_role, 0.0)
+
+        # Specificity: specific values with numbers, dates, or proper nouns
+        value_lower = self.value.lower()
+        has_number = any(c.isdigit() for c in self.value)
+        has_date = self.due_date is not None
+        has_entities = len(self.entities) > 0
+        if has_number:
+            score += 0.08
+        if has_date:
+            score += 0.05
+        if has_entities:
+            score += 0.04
+
+        # Evidence quote presence
+        if self.evidence_quote and len(self.evidence_quote) > 10:
+            score += 0.06
+
+        # Sentiment: neutral is more objective
+        if self.sentiment == "neutral":
+            score += 0.03
+        elif self.sentiment == "negative":
+            score -= 0.02  # Negative facts might be emotionally biased
+
+        # Temporal hint: current > ongoing > planned > future
+        temporal_scores = {
+            "current": 0.05,
+            "ongoing": 0.04,
+            "past": 0.03,
+            "planned": 0.02,
+            "future": 0.01,
+            "recurring": 0.03,
+        }
+        score += temporal_scores.get(self.temporal_hint, 0.0)
+
+        # Vague language penalty
+        vague_words = {"soon", "eventually", "maybe", "might", "possibly", "sometime", "later"}
+        if any(w in value_lower for w in vague_words):
+            score -= 0.10
+
+        return round(max(0.0, min(1.0, score)), 2)
+
+    def with_confidence(self) -> Fact:
+        """Return a copy of this fact with confidence computed."""
+        self.confidence = self.compute_confidence()
+        return self
 
 
 class IngestRequest(BaseModel):

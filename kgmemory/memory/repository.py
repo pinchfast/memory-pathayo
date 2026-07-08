@@ -11,7 +11,7 @@ from .schemas import SINGLE_VALUE_KINDS, Fact, FactKind, TemporalStatus
 FACT_RETURN = (
     "f.fact_id, f.subject, f.predicate, f.value, f.fact_kind, f.topics, f.entities, "
     "f.project, f.task, f.sentiment, f.temporal_status, f.valid_from, f.speaker, f.due_date, "
-    "f.speaker_role"
+    "f.speaker_role, f.confidence"
 )
 
 # Words that indicate completion vs in-progress/blocked states.
@@ -37,6 +37,7 @@ def row_to_fact_dict(row: list[Any]) -> dict[str, Any]:
         "speaker": row[12],
         "due_date": row[13],
         "speaker_role": row[14] if len(row) > 14 else None,
+        "confidence": float(row[15]) if len(row) > 15 and row[15] is not None else 0.5,
     }
 
 
@@ -90,6 +91,59 @@ class FactRepository:
         )
         return int(result[0][0]) if result else 0
 
+    async def link_commitment_fulfillment(self, facts: list[Fact]) -> int:
+        """When a status_update indicates completion, find matching open
+        commitments from the same person about the same subject and link them
+        with a FULFILLED_BY edge. This closes the commitment lifecycle."""
+        linked = 0
+        for fact in facts:
+            if fact.fact_kind != FactKind.STATUS_UPDATE:
+                continue
+            value_lower = fact.value.strip().lower()
+            if not any(w in value_lower for w in _COMPLETION_WORDS):
+                continue
+
+            # Find open commitments from the same person about the same subject
+            rows = await self.store.query(
+                "MATCH (c:Fact) "
+                "WHERE c.temporal_status = 'current' AND c.fact_kind = 'commitment' "
+                "AND toLower(c.subject) = $subject "
+                "AND coalesce(toLower(c.speaker), '') = coalesce($speaker, '') "
+                "AND NOT EXISTS { MATCH (c)-[:FULFILLED_BY]->(:Fact) } "
+                "RETURN c.fact_id, c.value",
+                {
+                    "subject": fact.subject.strip().lower(),
+                    "speaker": (fact.speaker or "").strip().lower(),
+                },
+            )
+            for row in rows:
+                commitment_id, commitment_value = row
+                # Check if the completion value references the commitment value
+                # (e.g., "shipped auth module" matches "ship auth module")
+                if self._is_completion_match(commitment_value, fact.value):
+                    await self.store.query(
+                        "MATCH (c:Fact {fact_id: $commitment_id}) "
+                        "MATCH (s:Fact {fact_id: $status_id}) "
+                        "MERGE (c)-[:FULFILLED_BY]->(s)",
+                        {"commitment_id": commitment_id, "status_id": fact.fact_id},
+                    )
+                    linked += 1
+        return linked
+
+    @staticmethod
+    def _is_completion_match(commitment_value: str, completion_value: str) -> bool:
+        """Check if a completion value plausibly refers to the same thing as
+        a commitment value. Uses word overlap to handle phrasing differences."""
+        def words(text: str) -> set[str]:
+            return {w for w in text.lower().split() if len(w) > 2}
+        commitment_words = words(commitment_value)
+        completion_words = words(completion_value)
+        if not commitment_words:
+            return True  # No commitment text to match against
+        overlap = commitment_words & completion_words
+        # At least 40% of commitment words appear in the completion
+        return len(overlap) / len(commitment_words) >= 0.4
+
     async def upsert_facts(self, facts: list[Fact]) -> int:
         if not facts:
             return 0
@@ -115,6 +169,7 @@ class FactRepository:
                 "episode_id": f.episode_id,
                 "temporal_status": f.temporal_status.value,
                 "valid_from": f.valid_from.isoformat(),
+                "confidence": f.confidence,
             }
             for f in facts
         ]
@@ -128,7 +183,7 @@ class FactRepository:
             "f.due_date = row.due_date, f.evidence_quote = row.evidence_quote, "
             "f.speaker = row.speaker, f.speaker_role = row.speaker_role, "
             "f.episode_id = row.episode_id, f.temporal_status = row.temporal_status, "
-            "f.valid_from = row.valid_from "
+            "f.valid_from = row.valid_from, f.confidence = row.confidence "
             "RETURN count(f)",
             {"rows": rows},
         )
@@ -434,4 +489,4 @@ def build_fact_from_raw(
         episode_id=episode_id,
         temporal_status=TemporalStatus.CURRENT,
         valid_from=timestamp,
-    )
+    ).with_confidence()
