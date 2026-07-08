@@ -2,6 +2,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from kgmemory.core.openapi import ORG_PROTECTED_RESPONSES
 from kgmemory.graph.client import get_org_store
 from kgmemory.orgs.auth import get_current_org
 from kgmemory.orgs.models import Organization
@@ -20,8 +21,37 @@ from .tasks import get_status, set_status
 
 router = APIRouter(prefix="/memory", tags=["memory"])
 
+INGEST_EXAMPLE = {
+    "message": "I will ship the auth module by Friday. The OAuth token refresh is blocking me.",
+    "speaker": "Dave",
+    "speaker_role": "engineer",
+    "channel": "slack",
+    "project": "api",
+}
+INGEST_RESPONSE_EXAMPLE = {"request_id": "a1b2c3d4e5f6", "status": "queued"}
 
-@router.post("/ingest", response_model=IngestAccepted, status_code=status.HTTP_202_ACCEPTED)
+
+@router.post(
+    "/ingest",
+    response_model=IngestAccepted,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Ingest a conversation message",
+    description=(
+        "Accept a conversation message (founder chat, Slack message, etc.) for async "
+        "processing. The worker extracts facts via LLM, embeds them, deduplicates, "
+        "and stores them in the org's knowledge graph. State inference runs "
+        "automatically after ingest. Returns a `request_id` immediately — poll "
+        "`GET /memory/ingest/{request_id}` for the result."
+    ),
+    responses={
+        **ORG_PROTECTED_RESPONSES,
+        202: {
+            "description": "Ingest accepted and queued",
+            "content": {"application/json": {"example": INGEST_RESPONSE_EXAMPLE}},
+        },
+    },
+    openapi_extra={"security": [{"OrgAPIKey": []}]},
+)
 async def ingest(payload: IngestRequest, org: Organization = Depends(get_current_org)):
     request_id = uuid.uuid4().hex
     await set_status(request_id, "queued")
@@ -36,7 +66,18 @@ async def ingest(payload: IngestRequest, org: Organization = Depends(get_current
     return IngestAccepted(request_id=request_id)
 
 
-@router.get("/ingest/{request_id}", response_model=IngestStatus)
+@router.get(
+    "/ingest/{request_id}",
+    response_model=IngestStatus,
+    summary="Check ingest job status",
+    description=(
+        "Poll the status of an async ingest job. States: `queued` → `running` → "
+        "`complete` (with result) or `failed` (with error). Results are retained "
+        "for 1 hour."
+    ),
+    responses=ORG_PROTECTED_RESPONSES,
+    openapi_extra={"security": [{"OrgAPIKey": []}]},
+)
 async def ingest_status(request_id: str, org: Organization = Depends(get_current_org)):
     record = await get_status(request_id)
     if record is None:
@@ -44,7 +85,44 @@ async def ingest_status(request_id: str, org: Organization = Depends(get_current
     return IngestStatus(**record)
 
 
-@router.post("/facts", response_model=FactRead, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/facts",
+    response_model=FactRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Add a fact manually",
+    description=(
+        "Add a fact directly without LLM extraction. Useful for structured data "
+        "imports or corrections. The fact is embedded and stored in the graph. "
+        "Single-valued facts (identity, availability) will supersede existing ones."
+    ),
+    responses={
+        **ORG_PROTECTED_RESPONSES,
+        201: {
+            "description": "Fact created",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "fact_id": "a1b2c3d4",
+                        "subject": "Dave",
+                        "predicate": "is skilled in",
+                        "value": "Python",
+                        "fact_kind": "skill",
+                        "topics": ["python", "backend"],
+                        "entities": [],
+                        "project": None,
+                        "task": None,
+                        "sentiment": "neutral",
+                        "temporal_status": "current",
+                        "valid_from": "2026-07-08T10:00:00Z",
+                        "speaker": None,
+                        "due_date": None,
+                    }
+                }
+            },
+        },
+    },
+    openapi_extra={"security": [{"OrgAPIKey": []}]},
+)
 async def add_fact(payload: AddFactRequest, org: Organization = Depends(get_current_org)):
     from kgmemory.llm.embeddings import get_embedder
 
@@ -58,15 +136,25 @@ async def add_fact(payload: AddFactRequest, org: Organization = Depends(get_curr
     return FactRead(**data)
 
 
-@router.get("/facts", response_model=list[FactRead])
+@router.get(
+    "/facts",
+    response_model=list[FactRead],
+    summary="List facts",
+    description=(
+        "List facts for the org, optionally filtered by subject, topic, project, "
+        "or fact kind. Only current (non-superseded) facts are returned by default."
+    ),
+    responses=ORG_PROTECTED_RESPONSES,
+    openapi_extra={"security": [{"OrgAPIKey": []}]},
+)
 async def list_facts(
     org: Organization = Depends(get_current_org),
-    subject: str | None = Query(None, max_length=300),
-    topic: str | None = Query(None, max_length=100),
-    project: str | None = Query(None, max_length=200),
-    fact_kind: str | None = Query(None, max_length=50),
-    current_only: bool = True,
-    limit: int = Query(100, ge=1, le=500),
+    subject: str | None = Query(None, max_length=300, description="Filter by subject (substring match)"),
+    topic: str | None = Query(None, max_length=100, description="Filter by topic slug"),
+    project: str | None = Query(None, max_length=200, description="Filter by project name"),
+    fact_kind: str | None = Query(None, max_length=50, description="Filter by fact kind"),
+    current_only: bool = Query(True, description="Only return current (non-superseded) facts"),
+    limit: int = Query(100, ge=1, le=500, description="Max results"),
 ):
     repo = FactRepository(await get_org_store(org.graph_name))
     facts = await repo.list_facts(
@@ -80,7 +168,14 @@ async def list_facts(
     return [FactRead(**fact) for fact in facts]
 
 
-@router.delete("/facts/{fact_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/facts/{fact_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Invalidate a fact",
+    description="Mark a fact as invalidated (no longer current). Does not delete it — the fact remains in the graph for history.",
+    responses={**ORG_PROTECTED_RESPONSES, 204: {"description": "Fact invalidated"}},
+    openapi_extra={"security": [{"OrgAPIKey": []}]},
+)
 async def invalidate_fact(fact_id: str, org: Organization = Depends(get_current_org)):
     repo = FactRepository(await get_org_store(org.graph_name))
     if not await repo.invalidate_fact(fact_id):

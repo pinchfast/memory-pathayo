@@ -7,9 +7,11 @@ from pydantic import BaseModel, Field
 
 
 class ReportRequest(BaseModel):
-    report_type: Literal["weekly", "status", "risk", "founder_summary"] = "weekly"
-    language: str = Field("en", max_length=16)
-    project: str | None = Field(None, max_length=200)
+    report_type: Literal["weekly", "status", "risk", "founder_summary"] = Field(
+        "weekly", description="Type of report to generate"
+    )
+    language: str = Field("en", max_length=16, description="Report language (ISO code)", examples=["en"])
+    project: str | None = Field(None, max_length=200, description="Optional project scope", examples=["api"])
 
 
 class ReportAccepted(BaseModel):

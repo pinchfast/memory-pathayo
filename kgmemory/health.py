@@ -25,7 +25,13 @@ class ReadinessResponse(BaseModel):
     graph_online: bool
 
 
-@router.get("/", response_model=HealthResponse)
+@router.get(
+    "/",
+    response_model=HealthResponse,
+    summary="Liveness probe",
+    description="Check if the service is alive and all dependencies are reachable. Returns 503 if any are down.",
+    responses={503: {"description": "One or more dependencies unavailable", "model": HealthResponse}},
+)
 async def check_health(response: Response):
     health = HealthResponse()
     try:
@@ -43,18 +49,22 @@ async def check_health(response: Response):
     except Exception:
         health.graph_online = False
         logger.exception("FalkorDB connection failed")
-    if not all(health.model_dump().values()):
+    if not all(v for k, v in health.model_dump().items() if k != "status"):
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         health.status = "degraded"
     return health
 
 
-@router.get("/ready", response_model=ReadinessResponse)
+@router.get(
+    "/ready",
+    response_model=ReadinessResponse,
+    summary="Readiness probe",
+    description="Check if the service is ready to serve traffic. Returns 503 if not ready.",
+    responses={503: {"description": "Not ready", "model": ReadinessResponse}},
+)
 async def check_readiness(response: Response):
     health = await check_health(response)
-    ready = all(
-        v for k, v in health.model_dump().items() if k != "status"
-    )
+    ready = all(v for k, v in health.model_dump().items() if k != "status")
     if not ready:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     return ReadinessResponse(

@@ -67,7 +67,7 @@ show_error_context = true
 ignore_missing_imports = true
 
 [tool.ruff]
-line-length = 120
+line-length = 140
 
 [tool.ruff.lint]
 select = [

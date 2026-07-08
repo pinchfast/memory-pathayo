@@ -97,13 +97,20 @@ class Fact(BaseModel):
 
 
 class IngestRequest(BaseModel):
-    message: str = Field(min_length=1, max_length=200_000)
-    speaker: str = Field(min_length=1, max_length=200)
-    speaker_role: SpeakerRole = SpeakerRole.OTHER
-    channel: str = Field("api", max_length=64)
-    session_id: str | None = Field(None, max_length=128)
-    project: str | None = Field(None, max_length=200)
-    timestamp: datetime | None = None
+    message: str = Field(
+        min_length=1,
+        max_length=200_000,
+        description="The conversation message to ingest (founder chat, Slack message, etc.)",
+        examples=[
+            "I will ship the auth module by Friday. The OAuth token refresh is blocking me."
+        ],
+    )
+    speaker: str = Field(min_length=1, max_length=200, description="Who said the message", examples=["Dave"])
+    speaker_role: SpeakerRole = Field(SpeakerRole.OTHER, description="Role of the speaker")
+    channel: str = Field("api", max_length=64, description="Source channel (slack, api, email, etc.)", examples=["slack"])
+    session_id: str | None = Field(None, max_length=128, description="Optional session/conversation ID")
+    project: str | None = Field(None, max_length=200, description="Optional project name to associate", examples=["api"])
+    timestamp: datetime | None = Field(None, description="When the message occurred (defaults to now)")
 
 
 class IngestAccepted(BaseModel):
@@ -147,9 +154,14 @@ class FactRead(BaseModel):
 
 
 class SearchRequest(BaseModel):
-    query: str = Field(min_length=1, max_length=4000)
-    max_facts: int = Field(20, ge=1, le=100)
-    rerank: bool = True
+    query: str = Field(
+        min_length=1,
+        max_length=4000,
+        description="The question or query to retrieve context for",
+        examples=["Is the API project on track? Any risks?"],
+    )
+    max_facts: int = Field(20, ge=1, le=100, description="Maximum facts to return")
+    rerank: bool = Field(True, description="Use LLM associative reranking (slower but more accurate)")
 
 
 class SearchResponse(BaseModel):

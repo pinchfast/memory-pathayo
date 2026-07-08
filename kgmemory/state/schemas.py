@@ -43,11 +43,19 @@ class StateInferenceResult(BaseModel):
 
 
 class DecisionRequest(BaseModel):
-    query: str = Field(min_length=1, max_length=4000)
-    audience: Literal["founder_non_technical", "founder_technical", "engineer", "internal"] = "founder_non_technical"
-    project: str | None = Field(None, max_length=200)
-    max_facts: int = Field(20, ge=1, le=100)
-    rerank: bool = True
+    query: str = Field(
+        min_length=1,
+        max_length=4000,
+        description="The question or situation the PM should respond to",
+        examples=["Is the API project on track? Should I be worried?"],
+    )
+    audience: Literal["founder_non_technical", "founder_technical", "engineer", "internal"] = Field(
+        "founder_non_technical",
+        description="Who the response is for — controls language and detail level",
+    )
+    project: str | None = Field(None, max_length=200, description="Optional project scope")
+    max_facts: int = Field(20, ge=1, le=100, description="Max facts to retrieve for context")
+    rerank: bool = Field(True, description="Use LLM associative reranking")
 
 
 class DecisionResponse(BaseModel):
