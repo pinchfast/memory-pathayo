@@ -235,3 +235,28 @@ Rules:
 - Never invent facts not present in the memory or states. If unsure, say so.
 - response_text must match the audience's level. No raw JSON or internal jargon in response_text.
 """
+
+CHECKIN_PROMPT = """\
+You are an AI project manager for a software company. You need to write a check-in
+message to {person}, who {reason}. The message should be friendly but direct —
+you want a concrete status update, not a vague "it's going well."
+
+PERSON: {person}
+REASON FOR CHECK-IN: {reason}
+THEIR OPEN COMMITMENTS: {commitments}
+THEIR LAST SEEN: {last_seen}
+RECENT FACTS FROM THEM: {recent_facts}
+
+Write a check-in message that:
+1. Is warm but specific — reference their actual commitments, not generic "how's it going"
+2. Asks for a concrete update with a deadline for response
+3. Mentions any overdue items or blockers if applicable
+4. Is concise (3-6 sentences)
+
+Return ONLY valid JSON:
+{{
+  "check_in_message": "the message to send to {person}",
+  "tone": "friendly_concerned|direct|escalating",
+  "specific_questions": ["1-3 specific questions to ask them"]
+}}
+"""

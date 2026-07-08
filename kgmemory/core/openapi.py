@@ -8,8 +8,11 @@ TAGS_METADATA = [
         "name": "pm-brain",
         "description": "The AI project manager's decision layer. **/pm/decide** synthesizes "
         "retrieved memory + current project/person states into an audience-tuned "
-        "response with suggested actions. **/pm/infer-state** manually triggers "
-        "state inference (normally runs automatically after each ingest).",
+        "response with suggested actions (auto-queued for execution). "
+        "**/pm/check-in** generates proactive check-in messages for silent or "
+        "at-risk engineers. **/pm/check-in/auto** scans for everyone who needs "
+        "checking in. **/pm/infer-state** manually triggers state inference "
+        "(normally runs automatically after each ingest).",
     },
     {
         "name": "memory",
@@ -38,6 +41,13 @@ TAGS_METADATA = [
         "name": "reports",
         "description": "Async LLM-composed reports (weekly / status / risk / founder_summary) "
         "in the org's preferred language. Returns a `report_id`; poll for the result.",
+    },
+    {
+        "name": "monitor",
+        "description": "Autonomous risk monitoring. The monitor loop runs every 15 minutes "
+        "via the SAQ worker, scanning for overdue commitments, engineer silence, "
+        "single points of failure, and stale blockers. Alerts are stored as graph "
+        "nodes — list them here, trigger a manual scan, or acknowledge resolved ones.",
     },
     {
         "name": "organizations",

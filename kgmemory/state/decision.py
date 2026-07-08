@@ -3,7 +3,9 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from kgmemory.actions.repository import store_actions
 from kgmemory.core.logger import logger
+from kgmemory.graph.client import get_org_store
 from kgmemory.llm.client import LLMError, get_llm
 from kgmemory.llm.parsing import parse_json_response
 from kgmemory.llm.prompts import PM_DECISION_PROMPT
@@ -45,13 +47,25 @@ async def decide(graph_name: str, request: DecisionRequest) -> dict[str, Any]:
             "risk_level": "medium",
         }
 
+    suggested_actions = payload.get("suggested_actions") or []
+
+    # Persist non-trivial actions to the action queue so the Django backend
+    # can fetch and execute them (Slack pings, escalations, etc.).
+    real_actions = [a for a in suggested_actions if a.get("action") and a["action"] != "none"]
+    if real_actions:
+        try:
+            store = await get_org_store(graph_name)
+            await store_actions(store, real_actions)
+        except Exception:
+            logger.exception(f"Failed to persist actions to queue for {graph_name}")
+
     elapsed = int((time.perf_counter() - started) * 1000)
     return {
         "query": request.query,
         "audience": request.audience,
         "response_text": payload.get("response_text", ""),
         "reasoning": payload.get("reasoning", ""),
-        "suggested_actions": payload.get("suggested_actions") or [],
+        "suggested_actions": suggested_actions,
         "risk_level": payload.get("risk_level", "medium"),
         "context_facts": context["facts"],
         "project_states": context.get("project_states") or [],

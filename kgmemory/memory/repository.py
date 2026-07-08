@@ -13,6 +13,11 @@ FACT_RETURN = (
     "f.project, f.task, f.sentiment, f.temporal_status, f.valid_from, f.speaker, f.due_date"
 )
 
+# Words that indicate completion vs in-progress/blocked states.
+# Used for lightweight contradiction detection without an LLM call.
+_COMPLETION_WORDS = {"completed", "done", "shipped", "finished", "delivered", "merged", "deployed", "resolved", "fixed"}
+_PROGRESS_WORDS = {"working on", "in progress", "blocked", "stuck", "started", "attempting", "trying", "wip", "pending"}
+
 
 def row_to_fact_dict(row: list[Any]) -> dict[str, Any]:
     return {
@@ -192,6 +197,74 @@ class FactRepository:
         for cypher, rows in statements:
             if rows:
                 await self.store.query(cypher, {"rows": rows})
+
+    async def detect_contradictions(self, facts: list[Fact]) -> list[dict[str, Any]]:
+        """Detect contradictions between new facts and existing current facts.
+
+        A contradiction is when a new status_update says something is completed
+        but an existing current fact says it's in-progress/blocked (or vice versa),
+        for the same subject and project. Returns a list of contradiction records
+        and supersedes the older conflicting fact.
+        """
+        contradictions: list[dict[str, Any]] = []
+        for fact in facts:
+            if fact.fact_kind != FactKind.STATUS_UPDATE:
+                continue
+            new_value_lower = fact.value.strip().lower()
+            new_is_completion = any(w in new_value_lower for w in _COMPLETION_WORDS)
+            new_is_progress = any(w in new_value_lower for w in _PROGRESS_WORDS)
+            if not (new_is_completion or new_is_progress):
+                continue
+
+            rows = await self.store.query(
+                "MATCH (f:Fact) "
+                "WHERE f.temporal_status = 'current' AND f.fact_kind = 'status_update' "
+                "AND f.fact_id <> $new_id "
+                "AND toLower(f.subject) = $subject "
+                "AND coalesce(toLower(f.project), '') = coalesce($project, '') "
+                f"RETURN {FACT_RETURN}",
+                {
+                    "new_id": fact.fact_id,
+                    "subject": fact.subject.strip().lower(),
+                    "project": (fact.project or "").strip().lower(),
+                },
+            )
+            for row in rows:
+                existing = row_to_fact_dict(row)
+                existing_lower = existing["value"].strip().lower()
+                existing_is_completion = any(w in existing_lower for w in _COMPLETION_WORDS)
+                existing_is_progress = any(w in existing_lower for w in _PROGRESS_WORDS)
+
+                # Contradiction: one says done, the other says in-progress
+                is_contradiction = (
+                    (new_is_completion and existing_is_progress)
+                    or (new_is_progress and existing_is_completion)
+                )
+                if not is_contradiction:
+                    continue
+
+                # Supersede the older fact — the newer one is the current truth
+                older, newer = (existing, fact) if existing["valid_from"] <= fact.valid_from.isoformat() else (fact, existing)
+                await self.store.query(
+                    "MATCH (f:Fact {fact_id: $old_id}) "
+                    "SET f.temporal_status = 'superseded', f.valid_until = $now, "
+                    "f.superseded_by = $new_id",
+                    {"old_id": older["fact_id"], "new_id": newer["fact_id"], "now": _iso_now()},
+                )
+                contradictions.append({
+                    "newer_fact_id": newer["fact_id"],
+                    "older_fact_id": older["fact_id"],
+                    "subject": fact.subject,
+                    "project": fact.project,
+                    "newer_value": newer["value"],
+                    "older_value": older["value"],
+                    "message": (
+                        f"Contradiction: '{fact.subject}' now says '{newer['value']}' "
+                        f"but previously said '{older['value']}'. "
+                        f"Older fact superseded."
+                    ),
+                })
+        return contradictions
 
     async def link_relations(self, relations: list[dict[str, str]]) -> int:
         created = 0

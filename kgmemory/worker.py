@@ -5,12 +5,14 @@ from tortoise import Tortoise
 
 from .core.config import settings
 from .db.config import TORTOISE_ORM
+from .monitor.tasks import MONITOR_SCHEDULE
 
 BACKGROUND_FUNCTIONS = [
     "kgmemory.users.tasks.log_user_email",
     "kgmemory.services.email.send_email_task",
     "kgmemory.memory.tasks.ingest_conversation",
     "kgmemory.reports.tasks.generate_report_task",
+    "kgmemory.monitor.tasks.monitor_all_orgs",
 ]
 
 
@@ -52,4 +54,5 @@ settings = {
     "concurrency": 10,
     "startup": startup,
     "shutdown": shutdown,
+    "cron": MONITOR_SCHEDULE,
 }

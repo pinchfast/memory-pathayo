@@ -59,8 +59,10 @@ async def ingest_message(graph_name: str, payload: IngestRequest) -> dict:
         created = await repo.upsert_facts(facts)
         await repo.link_bridges(facts)
         relations_created = await repo.link_relations(relations)
+        contradictions = await repo.detect_contradictions(facts)
     else:
         invalidated = created = relations_created = 0
+        contradictions = []
 
     FACTS_INGESTED.labels(graph_name).inc(created)
     result = {
@@ -69,6 +71,7 @@ async def ingest_message(graph_name: str, payload: IngestRequest) -> dict:
         "facts_created": created,
         "facts_invalidated": invalidated,
         "relations_created": relations_created,
+        "contradictions": contradictions,
         "failed_chunks": failed_chunks,
     }
     logger.info(f"Ingested message into {graph_name}: {result}")

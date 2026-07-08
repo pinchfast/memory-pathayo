@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 from kgmemory.core.config import settings
@@ -30,6 +31,8 @@ async def search_context(
 
     topics = [str(t).strip().lower() for t in intent.get("topics") or []][:12]
     entities = [str(e) for e in intent.get("entities") or []][:12]
+    fact_kind_hints = [str(k).strip().lower() for k in intent.get("fact_kind_hints") or []][:12]
+    temporal_scope = str(intent.get("temporal_scope") or "any").strip().lower()
 
     vector_hits, traversal_hits, recent = await asyncio.gather(
         repo.vector_search(query_embedding, settings.CONTEXT_DENSE_TOP_K),
@@ -43,7 +46,20 @@ async def search_context(
         if "similarity" in fact:
             existing["similarity"] = fact["similarity"]
 
-    scored = _dense_rank(list(candidates.values()), topics)
+    # Enrich facts with computed is_overdue flag
+    now = datetime.now(timezone.utc)
+    for fact in candidates.values():
+        fact["is_overdue"] = _compute_is_overdue(fact, now)
+
+    # Temporal scope filtering: if the query is about "current" status,
+    # deprioritize superseded/historical facts
+    if temporal_scope == "current":
+        candidates = {
+            fid: f for fid, f in candidates.items()
+            if f.get("temporal_status") == "current"
+        }
+
+    scored = _dense_rank(list(candidates.values()), topics, fact_kind_hints)
     shortlist = scored[: max(budget * 3, 30)]
 
     associations = await rank_associatively(query, shortlist) if rerank else {}
@@ -61,8 +77,30 @@ async def search_context(
     }
 
 
-def _dense_rank(facts: list[dict[str, Any]], topics: list[str]) -> list[dict[str, Any]]:
+def _compute_is_overdue(fact: dict[str, Any], now: datetime) -> bool:
+    """Compute whether a commitment fact is overdue at query time."""
+    if not fact.get("due_date"):
+        return False
+    if fact.get("fact_kind") != "commitment":
+        return False
+    if fact.get("temporal_status") != "current":
+        return False
+    try:
+        due = datetime.fromisoformat(fact["due_date"])
+        if due.tzinfo is None:
+            due = due.replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return False
+    return due < now
+
+
+def _dense_rank(
+    facts: list[dict[str, Any]],
+    topics: list[str],
+    fact_kind_hints: list[str] | None = None,
+) -> list[dict[str, Any]]:
     topic_set = set(topics)
+    hint_set = set(fact_kind_hints or [])
     for fact in facts:
         similarity = float(fact.get("similarity") or 0.0)
         overlap = (
@@ -70,8 +108,18 @@ def _dense_rank(facts: list[dict[str, Any]], topics: list[str]) -> list[dict[str
             if topic_set
             else 0.0
         )
+        # Intent-aware boost: if the query's fact_kind_hints match the fact's kind,
+        # boost the dense score. This makes "is the API on track?" surface
+        # status_updates and commitments over random facts.
+        kind_boost = 0.15 if hint_set and fact.get("fact_kind", "").lower() in hint_set else 0.0
+        # Overdue facts are inherently high-signal — boost them
+        overdue_boost = 0.1 if fact.get("is_overdue") else 0.0
         fact["dense_score"] = (
-            0.7 * similarity + 0.15 * overlap + 0.15 * recency_score(fact.get("valid_from"))
+            0.65 * similarity
+            + 0.12 * overlap
+            + 0.13 * recency_score(fact.get("valid_from"))
+            + kind_boost
+            + overdue_boost
         )
     return sorted(facts, key=lambda f: f["dense_score"], reverse=True)
 
@@ -106,10 +154,13 @@ def _render(
         lines = ["RELEVANT COMPANY MEMORY:"]
         for fact in facts:
             topics = ",".join(fact.get("topics") or [])
-            line = f"- [{fact['fact_kind']}|{topics}] {fact['subject']} {fact['predicate']} {fact['value']}"
+            overdue_tag = " [OVERDUE]" if fact.get("is_overdue") else ""
+            line = f"- [{fact['fact_kind']}|{topics}]{overdue_tag} {fact['subject']} {fact['predicate']} {fact['value']}"
             if fact.get("speaker"):
                 line += f" (from {fact['speaker']}"
                 line += f", {fact['valid_from'][:10]})" if fact.get("valid_from") else ")"
+            if fact.get("due_date"):
+                line += f" [due: {fact['due_date'][:10]}]"
             association = associations.get(fact["fact_id"])
             if association and association.get("reasoning"):
                 line += f"\n  -> {association['reasoning']}"

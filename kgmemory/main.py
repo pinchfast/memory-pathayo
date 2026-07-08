@@ -4,6 +4,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 
+from .actions.routes import router as actions_router
 from .contextengine.routes import router as context_router
 from .core.auth import get_auth_router
 from .core.config import settings
@@ -14,6 +15,7 @@ from .db.config import register_db
 from .health import router as health_router
 from .lifetime import shutdown, startup
 from .memory.routes import router as memory_router
+from .monitor.routes import router as monitor_router
 from .orgs.routes import router as orgs_router
 from .people.routes import router as people_router
 from .projects.routes import router as projects_router
@@ -44,9 +46,19 @@ The **brain** of an AI project manager that bridges founders and their engineeri
 
 4. **Decide** (`POST /pm/decide`) is the reasoning layer — it synthesizes
    retrieved memory + current states into an audience-tuned response with
-   concrete suggested actions (ping, escalate, reassign).
+   concrete suggested actions (ping, escalate, reassign). Actions are
+   auto-queued for the Django backend to execute via `GET /actions`.
 
-5. **Report** (`POST /reports/`) generates LLM-composed founder reports in the
+5. **Monitor** (`POST /monitor/scan`, `GET /monitor/alerts`) is the autonomous
+   risk scanner — runs every 15 minutes via the SAQ worker, detecting overdue
+   commitments, engineer silence, single points of failure, and stale blockers.
+   Alerts are stored as graph nodes for the backend to act on.
+
+6. **Check-in** (`POST /pm/check-in`, `POST /pm/check-in/auto`) is the proactive
+   outreach layer — the PM doesn't wait to be asked, it generates check-in
+   messages for silent or at-risk engineers referencing their actual commitments.
+
+7. **Report** (`POST /reports/`) generates LLM-composed founder reports in the
    org's preferred language.
 
 ## Authentication
@@ -134,6 +146,8 @@ def get_application() -> FastAPI:
     _app.include_router(users_router)
     _app.include_router(orgs_router)
     _app.include_router(memory_router)
+    _app.include_router(monitor_router)
+    _app.include_router(actions_router)
     _app.include_router(context_router)
     _app.include_router(people_router)
     _app.include_router(projects_router)
