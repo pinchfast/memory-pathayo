@@ -144,5 +144,41 @@ async def assign_task(store: GraphStore, task_id: str, person_name: str) -> None
     )
 
 
+async def auto_assign_task(store: GraphStore, task_id: str) -> dict[str, Any]:
+    """PM autonomously decides who to assign a task to and assigns it.
+    Uses skill coverage, workload balancing, and reliability scoring.
+    Returns the assignment result with rationale.
+    """
+    recommendations = await recommend_assignees(store, task_id)
+    if not recommendations:
+        return {"assigned": False, "reason": "No team members with matching skills found"}
+
+    # Pick the best candidate — already sorted by workload_score
+    best = recommendations[0]
+
+    # Don't assign if the best candidate has too many open tasks (5+)
+    if best.get("open_task_count", 0) >= 5:
+        return {
+            "assigned": False,
+            "reason": f"Best candidate ({best['person']}) already has {best['open_task_count']} open tasks",
+            "best_candidate": best,
+        }
+
+    # Assign the task
+    await assign_task(store, task_id, best["person"])
+
+    return {
+        "assigned": True,
+        "assignee": best["person"],
+        "rationale": (
+            f"Best skill coverage ({best['coverage']}), "
+            f"{best['open_task_count']} open tasks, "
+            f"workload score {best['workload_score']}"
+        ),
+        "matched_skills": best["matched_skills"],
+        "missing_skills": best["missing_skills"],
+    }
+
+
 async def get_store(graph_name: str) -> GraphStore:
     return await get_org_store(graph_name)

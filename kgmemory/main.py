@@ -16,6 +16,7 @@ from .health import router as health_router
 from .lifetime import shutdown, startup
 from .memory.routes import router as memory_router
 from .monitor.routes import router as monitor_router
+from .onboarding.routes import router as onboarding_router
 from .orgs.routes import router as orgs_router
 from .people.routes import router as people_router
 from .projects.routes import router as projects_router
@@ -149,6 +150,7 @@ def get_application() -> FastAPI:
     _app.include_router(monitor_router, prefix="/v1")
     _app.include_router(actions_router, prefix="/v1")
     _app.include_router(context_router, prefix="/v1")
+    _app.include_router(onboarding_router, prefix="/v1")
     _app.include_router(people_router, prefix="/v1")
     _app.include_router(projects_router, prefix="/v1")
     _app.include_router(reports_router, prefix="/v1")

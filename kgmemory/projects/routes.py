@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
 
 from kgmemory.core.openapi import ORG_PROTECTED_RESPONSES
 from kgmemory.orgs.auth import get_current_org
 from kgmemory.orgs.models import Organization
 
+from .intake import continue_project_intake, start_project_intake
 from .schemas import (
     AssignmentRecommendation,
     ProjectCreate,
@@ -13,6 +15,7 @@ from .schemas import (
 )
 from .service import (
     assign_task,
+    auto_assign_task,
     get_store,
     list_projects,
     list_tasks,
@@ -22,6 +25,18 @@ from .service import (
 )
 
 router = APIRouter(prefix="/projects", tags=["projects"])
+
+
+class IntakeStartRequest(BaseModel):
+    founder: str = Field(..., min_length=1, max_length=200, description="Founder name")
+    project_name: str | None = Field(None, max_length=200, description="Project name if known")
+
+
+class IntakeContinueRequest(BaseModel):
+    founder: str = Field(..., min_length=1, max_length=200, description="Founder name")
+    message: str = Field(..., min_length=1, max_length=5000, description="Founder's response")
+    current_step: str = Field(..., description="Current intake step")
+    project_name: str | None = Field(None, max_length=200, description="Project name if known")
 
 
 @router.post(
@@ -147,3 +162,72 @@ async def assign_task_endpoint(
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     return TaskRead(**task)
+
+
+@router.post(
+    "/tasks/{task_id}/auto-assign",
+    response_model=TaskRead,
+    summary="PM auto-assigns a task autonomously",
+    description=(
+        "The PM makes its own decision about who should take this task, based on "
+        "skills, current workload, and reliability. It assigns the task directly "
+        "and returns the result. This is autonomous assignment — the PM decides, "
+        "not just recommends."
+    ),
+    responses=ORG_PROTECTED_RESPONSES,
+    openapi_extra={"security": [{"OrgAPIKey": []}]},
+)
+async def auto_assign_endpoint(
+    task_id: str, org: Organization = Depends(get_current_org)
+):
+    store = await get_store(org.graph_name)
+    tasks = await list_tasks(store)
+    task = next((t for t in tasks if t["task_id"] == task_id), None)
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    result = await auto_assign_task(store, task_id)
+    if not result.get("assigned"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"No suitable assignee found: {result.get('reason', 'no candidates')}",
+        )
+    tasks = await list_tasks(store)
+    task = next((t for t in tasks if t["task_id"] == task_id), None)
+    return TaskRead(**task)
+
+
+@router.post(
+    "/intake/start",
+    summary="Start project intake conversation with founder",
+    description=(
+        "Begin a structured project intake conversation with a founder. The PM "
+        "asks about the project vision, goals, timeline, team, constraints, and "
+        "priorities — one question at a time. Facts are extracted and the project "
+        "is created automatically as the conversation progresses."
+    ),
+    responses=ORG_PROTECTED_RESPONSES,
+    openapi_extra={"security": [{"OrgAPIKey": []}]},
+)
+async def start_intake_endpoint(
+    payload: IntakeStartRequest, org: Organization = Depends(get_current_org)
+):
+    return await start_project_intake(org.graph_name, payload.founder, payload.project_name)
+
+
+@router.post(
+    "/intake/continue",
+    summary="Continue project intake conversation",
+    description=(
+        "Continue the project intake conversation. The founder's response is "
+        "ingested, facts are extracted, and the PM generates the next question. "
+        "Steps: vision → goals → timeline → team → constraints → priorities → done."
+    ),
+    responses=ORG_PROTECTED_RESPONSES,
+    openapi_extra={"security": [{"OrgAPIKey": []}]},
+)
+async def continue_intake_endpoint(
+    payload: IntakeContinueRequest, org: Organization = Depends(get_current_org)
+):
+    return await continue_project_intake(
+        org.graph_name, payload.founder, payload.message, payload.current_step, payload.project_name
+    )

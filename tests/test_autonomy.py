@@ -557,3 +557,78 @@ def test_dense_rank_confidence_boost():
     ranked = _dense_rank(facts, topics=["api"])
     assert ranked[0]["fact_id"] == "f1"
     assert ranked[0]["dense_score"] > ranked[1]["dense_score"]
+
+
+# --- Onboarding step progression ---
+
+
+def test_onboarding_step_order():
+    from kgmemory.onboarding.service import ONBOARDING_STEPS
+    assert ONBOARDING_STEPS[0] == "role_experience"
+    assert ONBOARDING_STEPS[-1] == "done"
+    assert "skills" in ONBOARDING_STEPS
+    assert "availability" in ONBOARDING_STEPS
+    assert "interests" in ONBOARDING_STEPS
+
+
+def test_onboarding_next_step():
+    from kgmemory.onboarding.service import _next_step
+    assert _next_step("role_experience") == "skills"
+    assert _next_step("skills") == "past_projects"
+    assert _next_step("work_style") == "done"
+    assert _next_step("done") == "done"
+
+
+# --- Project intake step progression ---
+
+
+def test_intake_step_order():
+    from kgmemory.projects.intake import INTAKE_STEPS
+    assert INTAKE_STEPS[0] == "vision"
+    assert INTAKE_STEPS[-1] == "done"
+    assert "goals" in INTAKE_STEPS
+    assert "timeline" in INTAKE_STEPS
+    assert "team" in INTAKE_STEPS
+    assert "constraints" in INTAKE_STEPS
+    assert "priorities" in INTAKE_STEPS
+
+
+def test_intake_next_step():
+    from kgmemory.projects.intake import _next_step
+    assert _next_step("vision") == "goals"
+    assert _next_step("goals") == "timeline"
+    assert _next_step("priorities") == "done"
+    assert _next_step("done") == "done"
+
+
+# --- Work review evidence extraction ---
+
+
+def test_evidence_pr_detected():
+    from kgmemory.state.review import _extract_evidence
+    evidence = _extract_evidence("I finished the auth module, see PR #123")
+    assert "PR/pull request" in evidence
+
+
+def test_evidence_deployment_detected():
+    from kgmemory.state.review import _extract_evidence
+    evidence = _extract_evidence("I deployed the API to production")
+    assert "deployment" in evidence
+
+
+def test_evidence_tests_detected():
+    from kgmemory.state.review import _extract_evidence
+    evidence = _extract_evidence("I wrote tests for the auth module")
+    assert "tests" in evidence
+
+
+def test_evidence_no_evidence():
+    from kgmemory.state.review import _extract_evidence
+    evidence = _extract_evidence("I finished it")
+    assert "No concrete evidence" in evidence
+
+
+def test_evidence_numbers_detected():
+    from kgmemory.state.review import _extract_evidence
+    evidence = _extract_evidence("I completed 3 endpoints with 95% test coverage")
+    assert "numbers" in evidence

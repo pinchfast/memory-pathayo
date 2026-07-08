@@ -10,6 +10,7 @@ from .checkin import check_in_auto, check_in_person
 from .decision import decide
 from .history import decision_accuracy, list_decisions, record_outcome
 from .inference import infer_and_snapshot_state
+from .review import plan_next_steps, review_work
 from .schemas import DecisionRequest, DecisionResponse, StateInferenceResult
 
 router = APIRouter(prefix="/pm", tags=["pm-brain"])
@@ -244,3 +245,75 @@ async def record_outcome_endpoint(
 async def decision_accuracy_endpoint(org: Organization = Depends(get_current_org)):
     store = await get_org_store(org.graph_name)
     return await decision_accuracy(store)
+
+
+class WorkReviewRequest(BaseModel):
+    engineer: str = Field(..., min_length=1, max_length=200, description="Engineer name")
+    claim: str = Field(..., min_length=1, max_length=5000, description="What the engineer claims to have done")
+    project: str | None = Field(None, max_length=200, description="Project name if known")
+
+
+class NextStepsRequest(BaseModel):
+    engineer: str = Field(..., min_length=1, max_length=200, description="Engineer name")
+    review: dict = Field(..., description="The work review result from /pm/review-work")
+
+
+@router.post(
+    "/review-work",
+    summary="Honest work review — AI evaluates claimed work",
+    description=(
+        "When an engineer reports 'I finished X', the PM evaluates the claim "
+        "honestly. It checks if the claim matches the original commitment, looks "
+        "for concrete evidence (PRs, deployments, tests), factors in the engineer's "
+        "credibility history, and produces a candid assessment. If the claim is "
+        "vague or unverified, it generates specific verification questions and "
+        "an honest message for the founder."
+    ),
+    responses=ORG_PROTECTED_RESPONSES,
+    openapi_extra={"security": [{"OrgAPIKey": []}]},
+)
+async def review_work_endpoint(
+    payload: WorkReviewRequest, org: Organization = Depends(get_current_org)
+):
+    return await review_work(org.graph_name, payload.engineer, payload.claim, payload.project)
+
+
+@router.post(
+    "/plan-next-steps",
+    summary="Plan next steps with an engineer",
+    description=(
+        "After reviewing an engineer's work, the PM collaboratively plans the "
+        "next steps. It acknowledges what was completed (honestly), addresses "
+        "any gaps from the review, suggests the next task(s) based on skills "
+        "and project priorities, and sets clear expectations with deadlines."
+    ),
+    responses=ORG_PROTECTED_RESPONSES,
+    openapi_extra={"security": [{"OrgAPIKey": []}]},
+)
+async def plan_next_steps_endpoint(
+    payload: NextStepsRequest, org: Organization = Depends(get_current_org)
+):
+    return await plan_next_steps(org.graph_name, payload.engineer, payload.review)
+
+
+class FounderDigestRequest(BaseModel):
+    audience: str = Field("founder_non_technical", description="founder_non_technical or founder_technical")
+
+
+@router.post(
+    "/founder-digest",
+    summary="Honest, filtered digest for the founder",
+    description=(
+        "Generate a ruthlessly filtered digest for a busy founder. Only includes "
+        "what they NEED to know — critical risks, genuine progress, and the one "
+        "action they should take. Maximum 5 bullet points. Green/yellow/red "
+        "urgency level. If everything is on track, says so in one sentence."
+    ),
+    responses=ORG_PROTECTED_RESPONSES,
+    openapi_extra={"security": [{"OrgAPIKey": []}]},
+)
+async def founder_digest_endpoint(
+    payload: FounderDigestRequest, org: Organization = Depends(get_current_org)
+):
+    from .digest import generate_founder_digest
+    return await generate_founder_digest(org.graph_name, payload.audience)

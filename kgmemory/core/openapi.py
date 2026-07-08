@@ -29,13 +29,20 @@ TAGS_METADATA = [
     },
     {
         "name": "people",
-        "description": "Team member profiles with skills and a reliability score derived from "
-        "their commitment / completion / performance history in the graph.",
+        "description": "Team member profiles with skills, experience, availability, interests, "
+        "reliability scores, and contribution timelines. The PM uses these to make "
+        "assignment decisions and track who delivers over time.",
     },
     {
         "name": "projects",
-        "description": "Projects and tasks. Task assignment recommendations match required "
-        "skills against team members' skills and rank candidates by coverage.",
+        "description": "Projects and tasks. Includes project intake conversation flow, "
+        "task assignment recommendations, and autonomous PM assignment.",
+    },
+    {
+        "name": "onboarding",
+        "description": "Engineer onboarding conversation. The PM has a structured interview "
+        "with each new engineer to learn about their skills, experience, availability, "
+        "and interests. Facts are extracted and stored automatically.",
     },
     {
         "name": "reports",
