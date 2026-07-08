@@ -11,7 +11,52 @@ from kgmemory.llm.parsing import parse_json_response
 from kgmemory.llm.prompts import PM_DECISION_PROMPT
 
 from ..contextengine.engine import search_context
+from .history import store_decision
 from .schemas import DecisionRequest
+
+
+def _compute_confidence(context: dict[str, Any]) -> float:
+    """Compute decision confidence from context quality.
+
+    Factors:
+    - Fact count: more supporting facts = higher confidence (capped)
+    - Fact recency: fresher facts = higher confidence
+    - State availability: having project + person states = higher confidence
+    - Source diversity: facts from multiple speakers = higher confidence
+    """
+    facts = context.get("facts") or []
+    project_states = context.get("project_states") or []
+    person_states = context.get("person_states") or []
+
+    # Fact count score: 0 facts = 0.2, 5+ facts = 1.0 (logarithmic)
+    fact_count_score = min(1.0, 0.2 + 0.3 * (len(facts) / 5)) if facts else 0.2
+
+    # Recency score: average recency of facts
+    if facts:
+        from kgmemory.contextengine.retrievers import recency_score
+
+        avg_recency = sum(recency_score(f.get("valid_from")) for f in facts) / len(facts)
+    else:
+        avg_recency = 0.3
+
+    # State availability: having both project and person states boosts confidence
+    state_score = 0.0
+    if project_states:
+        state_score += 0.15
+    if person_states:
+        state_score += 0.15
+
+    # Source diversity: facts from multiple distinct speakers
+    speakers = {f.get("speaker") for f in facts if f.get("speaker")}
+    diversity_score = min(0.15, 0.05 * len(speakers))
+
+    confidence = (
+        0.35 * fact_count_score
+        + 0.25 * avg_recency
+        + state_score
+        + diversity_score
+    )
+    return round(max(0.0, min(1.0, confidence)), 2)
 
 
 async def decide(graph_name: str, request: DecisionRequest) -> dict[str, Any]:
@@ -60,18 +105,31 @@ async def decide(graph_name: str, request: DecisionRequest) -> dict[str, Any]:
             logger.exception(f"Failed to persist actions to queue for {graph_name}")
 
     elapsed = int((time.perf_counter() - started) * 1000)
-    return {
+    confidence = _compute_confidence(context)
+
+    result = {
         "query": request.query,
         "audience": request.audience,
         "response_text": payload.get("response_text", ""),
         "reasoning": payload.get("reasoning", ""),
         "suggested_actions": suggested_actions,
         "risk_level": payload.get("risk_level", "medium"),
+        "confidence": confidence,
         "context_facts": context["facts"],
         "project_states": context.get("project_states") or [],
         "person_states": context.get("person_states") or [],
         "elapsed_ms": elapsed,
     }
+
+    # Persist the decision for audit trail and learning
+    try:
+        store = await get_org_store(graph_name)
+        decision_id = await store_decision(store, result)
+        result["decision_id"] = decision_id
+    except Exception:
+        logger.exception(f"Failed to store decision history for {graph_name}")
+
+    return result
 
 
 def _format_project_states(states: list[dict[str, Any]]) -> str:

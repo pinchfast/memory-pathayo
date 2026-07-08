@@ -114,12 +114,18 @@ def _dense_rank(
         kind_boost = 0.15 if hint_set and fact.get("fact_kind", "").lower() in hint_set else 0.0
         # Overdue facts are inherently high-signal — boost them
         overdue_boost = 0.1 if fact.get("is_overdue") else 0.0
+        # Source reliability weighting: founder statements are more authoritative
+        # than engineer claims, which are more reliable than unknown sources.
+        # A founder's commitment is a directive; an engineer's is a promise.
+        role = (fact.get("speaker_role") or "").lower()
+        source_boost = 0.08 if role == "founder" else 0.03 if role == "engineer" else 0.0
         fact["dense_score"] = (
-            0.65 * similarity
-            + 0.12 * overlap
-            + 0.13 * recency_score(fact.get("valid_from"))
+            0.6 * similarity
+            + 0.1 * overlap
+            + 0.12 * recency_score(fact.get("valid_from"))
             + kind_boost
             + overdue_boost
+            + source_boost
         )
     return sorted(facts, key=lambda f: f["dense_score"], reverse=True)
 

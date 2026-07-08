@@ -10,7 +10,8 @@ from .schemas import SINGLE_VALUE_KINDS, Fact, FactKind, TemporalStatus
 
 FACT_RETURN = (
     "f.fact_id, f.subject, f.predicate, f.value, f.fact_kind, f.topics, f.entities, "
-    "f.project, f.task, f.sentiment, f.temporal_status, f.valid_from, f.speaker, f.due_date"
+    "f.project, f.task, f.sentiment, f.temporal_status, f.valid_from, f.speaker, f.due_date, "
+    "f.speaker_role"
 )
 
 # Words that indicate completion vs in-progress/blocked states.
@@ -35,6 +36,7 @@ def row_to_fact_dict(row: list[Any]) -> dict[str, Any]:
         "valid_from": row[11],
         "speaker": row[12],
         "due_date": row[13],
+        "speaker_role": row[14] if len(row) > 14 else None,
     }
 
 

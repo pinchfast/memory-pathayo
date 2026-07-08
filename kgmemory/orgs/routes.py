@@ -14,6 +14,7 @@ from .schemas import (
     APIKeyRead,
     OrganizationCreate,
     OrganizationRead,
+    OrganizationUpdate,
 )
 
 router = APIRouter(prefix="/orgs", tags=["organizations"])
@@ -75,6 +76,28 @@ async def list_orgs(user: User = Depends(current_user)):
 )
 async def get_org(org_id: UUID, user: User = Depends(current_user)):
     return await _owned_org(org_id, user)
+
+
+@router.patch(
+    "/{org_id}",
+    response_model=OrganizationRead,
+    summary="Update organization settings",
+    description=(
+        "Update org settings: webhook URL + secret for push-based alert delivery, "
+        "report schedule (none/daily/weekly), report email, and preferred language. "
+        "Only provided fields are updated."
+    ),
+    responses={**ERROR_RESPONSES, 404: {"description": "Organization not found"}},
+)
+async def update_org(
+    org_id: UUID, payload: OrganizationUpdate, user: User = Depends(current_user)
+):
+    org = await _owned_org(org_id, user)
+    update_data = payload.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(org, key, value)
+    await org.save(update_fields=list(update_data.keys()))
+    return org
 
 
 @router.post(

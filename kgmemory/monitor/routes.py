@@ -6,7 +6,7 @@ from kgmemory.core.openapi import ORG_PROTECTED_RESPONSES
 from kgmemory.orgs.auth import get_current_org
 from kgmemory.orgs.models import Organization
 
-from .monitor import acknowledge_alert, get_alerts, run_monitor_loop
+from .monitor import acknowledge_alert, escalate_stale_alerts, get_alerts, run_monitor_loop
 
 router = APIRouter(prefix="/monitor", tags=["monitor"])
 
@@ -80,7 +80,37 @@ async def list_alerts_endpoint(
     openapi_extra={"security": [{"OrgAPIKey": []}]},
 )
 async def scan_endpoint(org: Organization = Depends(get_current_org)):
-    return await run_monitor_loop(org.graph_name)
+    return await run_monitor_loop(org.graph_name, org=org)
+
+
+@router.post(
+    "/escalate",
+    summary="Trigger escalation of stale alerts",
+    description=(
+        "Manually trigger escalation of alerts that have been open and "
+        "unacknowledged for 24+ hours. Increases severity by one level and "
+        "creates an escalation action. Normally runs every 6 hours via the "
+        "SAQ worker cron schedule."
+    ),
+    responses={
+        **ORG_PROTECTED_RESPONSES,
+        200: {
+            "description": "Escalation results",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "graph_name": "org_abc123",
+                        "escalated_count": 1,
+                        "escalated": [ALERT_EXAMPLE],
+                    }
+                }
+            },
+        },
+    },
+    openapi_extra={"security": [{"OrgAPIKey": []}]},
+)
+async def escalate_endpoint(org: Organization = Depends(get_current_org)):
+    return await escalate_stale_alerts(org.graph_name, org=org)
 
 
 @router.post(

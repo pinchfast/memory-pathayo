@@ -17,21 +17,24 @@ from typing import Any
 
 from kgmemory.core.logger import logger
 from kgmemory.graph.client import GraphStore, get_org_store
+from kgmemory.orgs.models import Organization
 
 from .repository import (
     ack_alert,
     list_alerts,
     store_alert,
 )
+from .webhooks import dispatch_alert_webhook_safe
 
 SILENCE_THRESHOLD_DAYS = 4
 OVERDUE_GRACE_HOURS = 2
 BLOCKER_STALE_DAYS = 3
 
 
-async def run_monitor_loop(graph_name: str) -> dict[str, Any]:
+async def run_monitor_loop(graph_name: str, org: Organization | None = None) -> dict[str, Any]:
     """Scan one org's graph for time-based risks and emit Alert nodes.
 
+    If an Organization model is passed, alerts are also dispatched via webhook.
     Returns a summary of alerts generated.
     """
     started = datetime.now(timezone.utc)
@@ -49,6 +52,8 @@ async def run_monitor_loop(graph_name: str) -> dict[str, Any]:
         alert = await store_alert(store, risk)
         if alert:
             generated.append(alert)
+            if org:
+                asyncio.create_task(dispatch_alert_webhook_safe(org, alert))
 
     elapsed_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
     logger.info(
@@ -202,3 +207,80 @@ async def get_alerts(
 async def acknowledge_alert(graph_name: str, alert_id: str) -> dict[str, Any] | None:
     store = await get_org_store(graph_name)
     return await ack_alert(store, alert_id)
+
+
+ESCALATION_THRESHOLD_HOURS = 24
+_SEVERITY_ORDER = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+
+
+async def escalate_stale_alerts(graph_name: str, org: Organization | None = None) -> dict[str, Any]:
+    """Escalate alerts that have been open and unacknowledged past the threshold.
+
+    Increases severity by one level and creates an action so the backend
+    is reminded to handle it. Also re-dispatches webhook.
+    """
+    store = await get_org_store(graph_name)
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=ESCALATION_THRESHOLD_HOURS)).isoformat()
+
+    rows = await store.query(
+        "MATCH (a:Alert {status: 'open'}) "
+        "WHERE a.created_at < $cutoff AND (a.escalation_level IS NULL OR a.escalation_level < 2) "
+        "RETURN a.alert_id, a.alert_type, a.subject, a.project, a.person, "
+        "a.severity, a.message, a.created_at, coalesce(a.escalation_level, 0)",
+        {"cutoff": cutoff},
+    )
+
+    escalated: list[dict[str, Any]] = []
+    for row in rows:
+        alert_id, alert_type, subject, project, person, severity, message, created_at, level = row
+        new_severity = _escalate_severity(severity)
+        new_level = level + 1
+        now = datetime.now(timezone.utc).isoformat()
+
+        await store.query(
+            "MATCH (a:Alert {alert_id: $alert_id}) "
+            "SET a.severity = $severity, a.escalation_level = $level, "
+            "a.escalated_at = $now",
+            {"alert_id": alert_id, "severity": new_severity, "level": new_level, "now": now},
+        )
+
+        # Create an action so the backend is reminded
+        from kgmemory.actions.repository import store_actions
+
+        action = {
+            "action": "escalate",
+            "target": person or project or subject,
+            "message": f"ESCALATED (level {new_level}): {message}",
+            "urgency": new_severity,
+        }
+        await store_actions(store, [action])
+
+        escalated_alert = {
+            "alert_id": alert_id,
+            "alert_type": alert_type,
+            "subject": subject,
+            "project": project,
+            "person": person,
+            "severity": new_severity,
+            "message": message,
+            "escalation_level": new_level,
+            "escalated_at": now,
+        }
+        escalated.append(escalated_alert)
+
+        if org:
+            asyncio.create_task(dispatch_alert_webhook_safe(org, escalated_alert))
+
+    logger.info(f"Escalation for {graph_name}: {len(escalated)} alerts escalated")
+    return {
+        "graph_name": graph_name,
+        "escalated_count": len(escalated),
+        "escalated": escalated,
+    }
+
+
+def _escalate_severity(current: str) -> str:
+    """Increase severity by one level."""
+    current_level = _SEVERITY_ORDER.get(current, 1)
+    higher = [label for label, level in _SEVERITY_ORDER.items() if level > current_level]
+    return higher[0] if higher else "critical"

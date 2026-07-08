@@ -125,6 +125,20 @@ class IngestStatus(BaseModel):
     error: str | None = None
 
 
+class BatchIngestRequest(BaseModel):
+    messages: list[IngestRequest] = Field(
+        min_length=1,
+        max_length=500,
+        description="List of conversation messages to ingest (up to 500 per batch)",
+    )
+
+
+class BatchIngestAccepted(BaseModel):
+    request_id: str
+    status: str = "queued"
+    message_count: int
+
+
 class AddFactRequest(BaseModel):
     subject: str = Field(min_length=1, max_length=300)
     predicate: str = Field(min_length=1, max_length=150)

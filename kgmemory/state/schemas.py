@@ -65,6 +65,7 @@ class DecisionResponse(BaseModel):
     reasoning: str
     suggested_actions: list[dict]
     risk_level: Literal["low", "medium", "high"]
+    confidence: float = Field(0.5, ge=0.0, le=1.0, description="PM confidence in the decision (0=uncertain, 1=very confident)")
     context_facts: list[dict]
     project_states: list[dict]
     person_states: list[dict]

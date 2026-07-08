@@ -16,6 +16,12 @@ class Organization(TimeStampedModel):
     is_active = fields.BooleanField(default=True)
     preferred_language = fields.CharField(max_length=16, default="en")
     slack_team_id = fields.CharField(max_length=64, null=True)
+    webhook_url = fields.CharField(max_length=500, null=True)
+    webhook_secret = fields.CharField(max_length=128, null=True)
+    report_schedule = fields.CharField(max_length=16, default="none")
+    report_email = fields.CharField(max_length=255, null=True)
+    monthly_token_quota = fields.IntField(default=500_000)
+    tokens_used_this_month = fields.IntField(default=0)
 
     class Meta:
         table = "organizations"

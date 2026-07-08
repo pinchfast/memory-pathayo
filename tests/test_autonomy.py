@@ -1,12 +1,16 @@
 """Tests for contradiction detection, overdue computation, intent-aware ranking,
-and check-in reasoning."""
+check-in reasoning, confidence scoring, source reliability weighting,
+embedding fallback, and escalation logic."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
 from kgmemory.contextengine.engine import _compute_is_overdue, _dense_rank
+from kgmemory.llm.embeddings import EmbeddingClient
 from kgmemory.memory.repository import _COMPLETION_WORDS, _PROGRESS_WORDS
+from kgmemory.monitor.monitor import _escalate_severity
 from kgmemory.state.checkin import _derive_check_in_reason, _days_since
+from kgmemory.state.decision import _compute_confidence
 
 
 # --- Contradiction detection heuristics ---
@@ -234,3 +238,176 @@ def test_days_since_none():
 
 def test_days_since_invalid():
     assert _days_since("not-a-date") is None
+
+
+# --- Confidence scoring ---
+
+
+def test_confidence_high_with_many_facts_and_states():
+    context = {
+        "facts": [{"valid_from": datetime.now(timezone.utc).isoformat(), "speaker": "dave"}] * 10,
+        "project_states": [{"project": "api", "health": "on_track"}],
+        "person_states": [{"person": "dave", "credibility": "high"}],
+    }
+    confidence = _compute_confidence(context)
+    assert confidence > 0.5
+
+
+def test_confidence_low_with_no_facts():
+    context = {"facts": [], "project_states": [], "person_states": []}
+    confidence = _compute_confidence(context)
+    assert confidence < 0.3
+
+
+def test_confidence_medium_with_some_facts():
+    context = {
+        "facts": [{"valid_from": datetime.now(timezone.utc).isoformat(), "speaker": "dave"}] * 3,
+        "project_states": [],
+        "person_states": [],
+    }
+    confidence = _compute_confidence(context)
+    assert 0.2 < confidence < 0.7
+
+
+def test_confidence_boosted_by_states():
+    """Having project + person states should boost confidence."""
+    base = {
+        "facts": [{"valid_from": datetime.now(timezone.utc).isoformat(), "speaker": "dave"}] * 3,
+        "project_states": [],
+        "person_states": [],
+    }
+    with_states = {
+        **base,
+        "project_states": [{"project": "api"}],
+        "person_states": [{"person": "dave"}],
+    }
+    assert _compute_confidence(with_states) > _compute_confidence(base)
+
+
+def test_confidence_boosted_by_speaker_diversity():
+    """Facts from multiple speakers should boost confidence."""
+    now_str = datetime.now(timezone.utc).isoformat()
+    single_speaker = {
+        "facts": [{"valid_from": now_str, "speaker": "dave"}] * 5,
+        "project_states": [],
+        "person_states": [],
+    }
+    multi_speaker = {
+        "facts": [
+            {"valid_from": now_str, "speaker": "dave"},
+            {"valid_from": now_str, "speaker": "alice"},
+            {"valid_from": now_str, "speaker": "bob"},
+        ],
+        "project_states": [],
+        "person_states": [],
+    }
+    assert _compute_confidence(multi_speaker) >= _compute_confidence(single_speaker)
+
+
+# --- Source reliability weighting ---
+
+
+def test_dense_rank_founder_boost():
+    """Facts from founders should rank higher than facts from engineers."""
+    facts = [
+        {
+            "fact_id": "f1",
+            "fact_kind": "decision",
+            "topics": ["api"],
+            "similarity": 0.5,
+            "valid_from": datetime.now(timezone.utc).isoformat(),
+            "is_overdue": False,
+            "speaker_role": "founder",
+        },
+        {
+            "fact_id": "f2",
+            "fact_kind": "decision",
+            "topics": ["api"],
+            "similarity": 0.5,
+            "valid_from": datetime.now(timezone.utc).isoformat(),
+            "is_overdue": False,
+            "speaker_role": "engineer",
+        },
+    ]
+    ranked = _dense_rank(facts, topics=["api"])
+    assert ranked[0]["fact_id"] == "f1"  # founder ranks higher
+    assert ranked[0]["dense_score"] > ranked[1]["dense_score"]
+
+
+def test_dense_rank_engineer_beats_unknown():
+    """Facts from engineers should rank higher than unknown sources."""
+    facts = [
+        {
+            "fact_id": "f1",
+            "fact_kind": "status_update",
+            "topics": ["api"],
+            "similarity": 0.5,
+            "valid_from": datetime.now(timezone.utc).isoformat(),
+            "is_overdue": False,
+            "speaker_role": "engineer",
+        },
+        {
+            "fact_id": "f2",
+            "fact_kind": "status_update",
+            "topics": ["api"],
+            "similarity": 0.5,
+            "valid_from": datetime.now(timezone.utc).isoformat(),
+            "is_overdue": False,
+            "speaker_role": None,
+        },
+    ]
+    ranked = _dense_rank(facts, topics=["api"])
+    assert ranked[0]["fact_id"] == "f1"  # engineer ranks higher
+
+
+# --- Embedding fallback ---
+
+
+def test_hash_embedding_deterministic():
+    """Same text should produce the same fallback embedding."""
+    client = EmbeddingClient()
+    e1 = client._hash_embedding("test text")
+    e2 = client._hash_embedding("test text")
+    assert e1 == e2
+    assert len(e1) == client.dimensions
+
+
+def test_hash_embedding_different_text():
+    """Different text should produce different fallback embeddings."""
+    client = EmbeddingClient()
+    e1 = client._hash_embedding("hello world")
+    e2 = client._hash_embedding("goodbye world")
+    assert e1 != e2
+
+
+def test_hash_embedding_dimensions():
+    """Fallback embedding should match configured dimensions."""
+    client = EmbeddingClient()
+    emb = client._hash_embedding("test")
+    assert len(emb) == client.dimensions
+
+
+def test_hash_embedding_range():
+    """Fallback embedding values should be in [-1, 1] range."""
+    client = EmbeddingClient()
+    emb = client._hash_embedding("test text for range check")
+    assert all(-1.0 <= v <= 1.0 for v in emb)
+
+
+# --- Escalation logic ---
+
+
+def test_escalate_severity_medium_to_high():
+    assert _escalate_severity("medium") == "high"
+
+
+def test_escalate_severity_high_to_critical():
+    assert _escalate_severity("high") == "critical"
+
+
+def test_escalate_severity_low_to_medium():
+    assert _escalate_severity("low") == "medium"
+
+
+def test_escalate_severity_critical_stays():
+    assert _escalate_severity("critical") == "critical"

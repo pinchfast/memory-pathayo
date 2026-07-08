@@ -25,6 +25,9 @@ FACTS_INGESTED = Counter(
 LLM_CALLS = Counter(
     "kgmemory_llm_calls_total", "LLM calls by outcome", ["kind", "outcome"]
 )
+LLM_TOKENS = Counter(
+    "kgmemory_llm_tokens_total", "LLM tokens used", ["kind", "direction"]  # direction: input/output
+)
 SEARCHES = Counter("kgmemory_searches_total", "Context searches", ["org"])
 
 router = APIRouter()

@@ -24,7 +24,20 @@ async def get_current_org(api_key: str | None = Security(api_key_header)) -> Org
     await enforce_rate_limit(str(record.organization_id))
     record.last_used_at = now()
     await record.save(update_fields=["last_used_at"])
-    return record.organization
+
+    # Set org context for token tracking
+    from kgmemory.llm.client import get_llm
+    get_llm().set_org_context(str(record.organization_id))
+
+    # Quota check
+    org = record.organization
+    if org.monthly_token_quota > 0 and org.tokens_used_this_month >= org.monthly_token_quota:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Monthly token quota exceeded ({org.tokens_used_this_month}/{org.monthly_token_quota})",
+        )
+
+    return org
 
 
 CurrentOrg = Depends(get_current_org)

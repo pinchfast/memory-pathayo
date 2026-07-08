@@ -1,11 +1,14 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
 
 from kgmemory.core.openapi import ORG_PROTECTED_RESPONSES
+from kgmemory.graph.client import get_org_store
 from kgmemory.orgs.auth import get_current_org
 from kgmemory.orgs.models import Organization
 
 from .checkin import check_in_auto, check_in_person
 from .decision import decide
+from .history import decision_accuracy, list_decisions, record_outcome
 from .inference import infer_and_snapshot_state
 from .schemas import DecisionRequest, DecisionResponse, StateInferenceResult
 
@@ -172,3 +175,72 @@ async def check_in_person_endpoint(
 )
 async def check_in_auto_endpoint(org: Organization = Depends(get_current_org)):
     return await check_in_auto(org.graph_name)
+
+
+class DecisionOutcomeRequest(BaseModel):
+    outcome: str = Field(..., pattern=r"^(correct|helped|incorrect|neutral)$",
+                        description="Did the PM's recommendation help?")
+    notes: str = Field("", max_length=2000, description="Optional context about the outcome")
+
+
+@router.get(
+    "/decisions",
+    summary="List past decisions",
+    description=(
+        "List past PM decisions stored in the graph. Each decision includes the "
+        "query, risk level, confidence, and outcome (if recorded). Use "
+        "`with_outcome_only=true` to filter to only decisions that have feedback."
+    ),
+    responses=ORG_PROTECTED_RESPONSES,
+    openapi_extra={"security": [{"OrgAPIKey": []}]},
+)
+async def list_decisions_endpoint(
+    with_outcome_only: bool = Query(False),
+    limit: int = Query(50, ge=1, le=200),
+    org: Organization = Depends(get_current_org),
+):
+    store = await get_org_store(org.graph_name)
+    return await list_decisions(store, limit=limit, with_outcome_only=with_outcome_only)
+
+
+@router.post(
+    "/decisions/{decision_id}/outcome",
+    summary="Record decision outcome (feedback loop)",
+    description=(
+        "Record the outcome of a past PM decision. This is the feedback loop: "
+        "the Django backend reports whether the PM's recommendation was correct, "
+        "helped, incorrect, or neutral. Over time, this data is used to compute "
+        "decision accuracy metrics and calibrate confidence."
+    ),
+    responses={
+        **ORG_PROTECTED_RESPONSES,
+        404: {"description": "Decision not found"},
+    },
+    openapi_extra={"security": [{"OrgAPIKey": []}]},
+)
+async def record_outcome_endpoint(
+    decision_id: str,
+    payload: DecisionOutcomeRequest,
+    org: Organization = Depends(get_current_org),
+):
+    store = await get_org_store(org.graph_name)
+    result = await record_outcome(store, decision_id, payload.outcome, payload.notes)
+    if result is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Decision not found")
+    return result
+
+
+@router.get(
+    "/decisions/accuracy",
+    summary="Decision accuracy metrics",
+    description=(
+        "Compute decision accuracy from recorded outcomes. Returns the total "
+        "number of decisions with feedback, outcome distribution, and accuracy "
+        "score (correct + helped / total)."
+    ),
+    responses=ORG_PROTECTED_RESPONSES,
+    openapi_extra={"security": [{"OrgAPIKey": []}]},
+)
+async def decision_accuracy_endpoint(org: Organization = Depends(get_current_org)):
+    store = await get_org_store(org.graph_name)
+    return await decision_accuracy(store)

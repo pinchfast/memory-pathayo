@@ -11,6 +11,8 @@ from kgmemory.worker import queue
 from .repository import FactRepository
 from .schemas import (
     AddFactRequest,
+    BatchIngestAccepted,
+    BatchIngestRequest,
     Fact,
     FactRead,
     IngestAccepted,
@@ -64,6 +66,45 @@ async def ingest(payload: IngestRequest, org: Organization = Depends(get_current
         retries=3,
     )
     return IngestAccepted(request_id=request_id)
+
+
+@router.post(
+    "/ingest/batch",
+    response_model=BatchIngestAccepted,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Batch ingest multiple messages",
+    description=(
+        "Accept up to 500 conversation messages at once for async processing. "
+        "Ideal for importing Slack history, email threads, or backfilling on "
+        "day one. Facts are extracted from all messages, embedded in a single "
+        "batch, and state inference runs once after the entire batch. Returns "
+        "a `request_id` — poll `GET /memory/ingest/{request_id}` for the result."
+    ),
+    responses={
+        **ORG_PROTECTED_RESPONSES,
+        202: {
+            "description": "Batch ingest accepted and queued",
+            "content": {
+                "application/json": {
+                    "example": {"request_id": "a1b2c3d4e5f6", "status": "queued", "message_count": 42},
+                }
+            },
+        },
+    },
+    openapi_extra={"security": [{"OrgAPIKey": []}]},
+)
+async def ingest_batch(payload: BatchIngestRequest, org: Organization = Depends(get_current_org)):
+    request_id = uuid.uuid4().hex
+    await set_status(request_id, "queued")
+    await queue.enqueue(
+        "ingest_batch_conversation",
+        request_id=request_id,
+        graph_name=org.graph_name,
+        messages=[m.model_dump(mode="json") for m in payload.messages],
+        key=f"ingest:{request_id}",
+        retries=2,
+    )
+    return BatchIngestAccepted(request_id=request_id, message_count=len(payload.messages))
 
 
 @router.get(

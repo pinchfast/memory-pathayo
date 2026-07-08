@@ -3,7 +3,7 @@ import json
 from kgmemory.core.logger import logger
 from kgmemory.core.redis import get_redis
 
-from .ingest import ingest_message
+from .ingest import ingest_batch, ingest_message
 from .schemas import IngestRequest
 
 STATUS_TTL_SECONDS = 3600
@@ -29,6 +29,20 @@ async def ingest_conversation(_: dict, *, request_id: str, graph_name: str, payl
         result = await ingest_message(graph_name, IngestRequest(**payload))
     except Exception as exc:
         logger.exception(f"Ingest {request_id} failed")
+        await set_status(request_id, "failed", error=str(exc))
+        raise
+    await set_status(request_id, "complete", result=result)
+    return result
+
+
+async def ingest_batch_conversation(
+    _: dict, *, request_id: str, graph_name: str, messages: list[dict]
+) -> dict:
+    await set_status(request_id, "running")
+    try:
+        result = await ingest_batch(graph_name, [IngestRequest(**m) for m in messages])
+    except Exception as exc:
+        logger.exception(f"Batch ingest {request_id} failed")
         await set_status(request_id, "failed", error=str(exc))
         raise
     await set_status(request_id, "complete", result=result)
