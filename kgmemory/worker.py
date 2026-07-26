@@ -1,6 +1,7 @@
 from importlib import import_module
 
 from saq import Queue
+from saq.job import CronJob
 from tortoise import Tortoise
 
 from .core.config import settings
@@ -50,11 +51,17 @@ async def shutdown(_: dict):
 
 queue = Queue.from_url(str(settings.REDIS_URL))
 
+_CRON_SCHEDULES = {**MONITOR_SCHEDULE, **SCHEDULED_REPORT_SCHEDULE}
+_CRON_JOBS = [
+    CronJob(function=spec["function"], cron=spec["cron"])
+    for spec in _CRON_SCHEDULES.values()
+]
+
 settings = {
     "queue": queue,
     "functions": FUNCTIONS,
     "concurrency": 10,
     "startup": startup,
     "shutdown": shutdown,
-    "cron": {**MONITOR_SCHEDULE, **SCHEDULED_REPORT_SCHEDULE},
+    "cron_jobs": _CRON_JOBS,
 }

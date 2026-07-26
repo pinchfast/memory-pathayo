@@ -55,7 +55,7 @@ async def _collect_project_signals(store: GraphStore) -> dict[str, dict[str, Any
     rows = await store.query(
         "MATCH (f:Fact) WHERE f.temporal_status = 'current' AND f.valid_from >= $since "
         "AND f.project IS NOT NULL "
-        "AND NOT (f.fact_kind = 'commitment' AND EXISTS { MATCH (f)-[:FULFILLED_BY]->(:Fact) }) "
+        "AND NOT (f.fact_kind = 'commitment' AND (f)-[:FULFILLED_BY]->(:Fact)) "
         "RETURN f.project, f.fact_kind, f.speaker, f.value, f.valid_from, f.due_date",
         {"since": since},
     )
@@ -95,7 +95,7 @@ async def _collect_person_signals(store: GraphStore) -> dict[str, dict[str, Any]
     rows = await store.query(
         "MATCH (p:Person)-[:STATED]->(f:Fact) "
         "WHERE f.temporal_status = 'current' AND f.valid_from >= $since "
-        "AND NOT (f.fact_kind = 'commitment' AND EXISTS { MATCH (f)-[:FULFILLED_BY]->(:Fact) }) "
+        "AND NOT (f.fact_kind = 'commitment' AND (f)-[:FULFILLED_BY]->(:Fact)) "
         "RETURN p.name, f.fact_kind, f.value, f.valid_from, f.due_date",
         {"since": since},
     )

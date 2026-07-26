@@ -109,7 +109,7 @@ class FactRepository:
                 "WHERE c.temporal_status = 'current' AND c.fact_kind = 'commitment' "
                 "AND toLower(c.subject) = $subject "
                 "AND coalesce(toLower(c.speaker), '') = coalesce($speaker, '') "
-                "AND NOT EXISTS { MATCH (c)-[:FULFILLED_BY]->(:Fact) } "
+                "AND NOT (c)-[:FULFILLED_BY]->(:Fact) "
                 "RETURN c.fact_id, c.value",
                 {
                     "subject": fact.subject.strip().lower(),

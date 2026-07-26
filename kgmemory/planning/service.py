@@ -154,7 +154,7 @@ async def analyze_dependencies(store: GraphStore, project: str | None = None) ->
             "MATCH (f:Fact) WHERE f.value CONTAINS $blocker_text "
             "AND f.fact_kind = 'commitment' AND f.due_date IS NOT NULL "
             "AND f.due_date < $now AND f.temporal_status = 'current' "
-            "AND NOT EXISTS { MATCH (f)-[:FULFILLED_BY]->(:Fact) } "
+            "AND NOT (f)-[:FULFILLED_BY]->(:Fact) "
             "RETURN f.value, f.due_date, f.subject",
             {"blocker_text": dep["blocker"][:30], "now": datetime.now(timezone.utc).isoformat()},
         )
@@ -213,7 +213,7 @@ async def estimation_accuracy(store: GraphStore, person: str | None = None) -> d
     # Get completed tasks with estimates
     rows = await store.query(
         "MATCH (t:Task) WHERE t.status = 'done' AND t.estimated_days IS NOT NULL "
-        + ("AND EXISTS { MATCH (p:Person {name: $name})-[:ASSIGNED_TO]->(t) } " if person else "")
+        + ("AND (p:Person {name: $name})-[:ASSIGNED_TO]->(t) " if person else "")
         + "OPTIONAL MATCH (p:Person)-[:ASSIGNED_TO]->(t) "
         + "RETURN t.task_id, t.title, t.estimated_days, t.project, head(collect(p.name))",
         {"name": person} if person else {},

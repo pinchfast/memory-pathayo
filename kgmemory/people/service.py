@@ -175,7 +175,7 @@ async def get_contributions(store: GraphStore, name: str) -> dict[str, Any]:
     # Count fulfilled commitments (work actually delivered)
     fulfilled_rows = await store.query(
         "MATCH (p:Person {name: $name})-[:STATED]->(c:Fact) "
-        "WHERE c.fact_kind = 'commitment' AND EXISTS { MATCH (c)-[:FULFILLED_BY]->(:Fact) } "
+        "WHERE c.fact_kind = 'commitment' AND (c)-[:FULFILLED_BY]->(:Fact) "
         "RETURN count(c)",
         {"name": name.strip().lower()},
     )

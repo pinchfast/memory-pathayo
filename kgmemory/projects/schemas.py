@@ -33,7 +33,7 @@ class TaskCreate(BaseModel):
 
 class TaskRead(BaseModel):
     task_id: str
-    title: str
+    title: str | None = None
     project: str
     status: str
     required_skills: list[str]

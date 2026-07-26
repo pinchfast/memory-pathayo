@@ -5,7 +5,8 @@ WORKDIR /tmp
 RUN pip install --no-cache-dir uv
 
 COPY pyproject.toml ./
-RUN uv export --no-dev --no-hashes -o requirements.txt
+COPY kgmemory ./kgmemory
+RUN uv export --no-dev --no-hashes --no-editable -o requirements.txt
 
 FROM python:3.14-slim
 

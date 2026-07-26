@@ -68,7 +68,7 @@ async def check_health(response: Response):
     # LLM check — only if embedding is up (they often share the same endpoint)
     try:
         from kgmemory.llm.client import get_llm
-        await get_llm().complete("Reply with: ok", kind="health", max_tokens=5)
+        await get_llm().complete("Reply with: ok", kind="health", max_tokens=2000)
     except Exception:
         health.llm_online = False
         logger.warning("LLM API health check failed")

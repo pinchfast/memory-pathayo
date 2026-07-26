@@ -67,7 +67,7 @@ async def list_tasks(store: GraphStore, project: str | None = None) -> list[dict
     where = "WHERE t.project = $project " if project else ""
     params: dict[str, Any] = {"project": project} if project else {}
     rows = await store.query(
-        "MATCH (t:Task)<-[:PART_OF]-(p:Project) "
+        "MATCH (t:Task)-[:PART_OF]->(p:Project) "
         f"{where}"
         "OPTIONAL MATCH (person:Person)-[:ASSIGNED_TO]->(t) "
         "WITH t, p, collect(person.name) AS assignees "
@@ -78,7 +78,7 @@ async def list_tasks(store: GraphStore, project: str | None = None) -> list[dict
     return [
         {
             "task_id": r[0],
-            "title": r[1],
+            "title": r[1] or (r[0].split(":", 1)[-1] if ":" in r[0] else r[0]),
             "project": r[2],
             "status": r[3] or "open",
             "required_skills": r[4] or [],
@@ -101,15 +101,17 @@ async def recommend_assignees(store: GraphStore, task_id: str) -> list[dict[str,
     if not required:
         return []
     # Get people with their skills AND current open task count for workload balancing
+    # Skills come from both the Person.skills property and skill Fact nodes
     people = await store.query(
         "MATCH (p:Person) "
         "OPTIONAL MATCH (p)-[:ASSIGNED_TO]->(t:Task) WHERE t.status <> 'done' "
-        "WITH p, count(t) AS open_tasks "
-        "RETURN p.name, p.skills, p.role, open_tasks"
+        "OPTIONAL MATCH (p)-[:STATED]->(sf:Fact) WHERE sf.fact_kind = 'skill' "
+        "WITH p, count(DISTINCT t) AS open_tasks, collect(DISTINCT sf.value) AS skill_facts "
+        "RETURN p.name, coalesce(p.skills, []) + skill_facts, p.role, open_tasks"
     )
     recommendations = []
     for name, skills, role, open_tasks in people:
-        skill_set = {s.lower() for s in skills or []}
+        skill_set = {s.lower() for s in (skills or []) if s}
         matched = set(required) & skill_set
         if not matched:
             continue

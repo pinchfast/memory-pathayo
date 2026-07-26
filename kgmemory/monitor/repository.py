@@ -38,6 +38,7 @@ async def store_alert(store: GraphStore, risk: dict[str, Any]) -> dict[str, Any]
         "OPTIONAL MATCH (p:Project {name: a.project}) "
         "FOREACH (_ IN CASE WHEN p IS NOT NULL THEN [1] ELSE [] END | "
         "  MERGE (a)-[:ABOUT_PROJECT]->(p)) "
+        "WITH a "
         "OPTIONAL MATCH (pe:Person {name: a.person}) "
         "FOREACH (_ IN CASE WHEN pe IS NOT NULL THEN [1] ELSE [] END | "
         "  MERGE (a)-[:ABOUT_PERSON]->(pe))",

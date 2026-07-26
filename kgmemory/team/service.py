@@ -149,9 +149,11 @@ async def sense_team_morale(graph_name: str) -> dict[str, Any]:
 
     # Get silence patterns (people with no facts in last 7 days)
     silence_rows = await store.query(
-        "MATCH (p:Person) WHERE NOT EXISTS { "
-        "  MATCH (p)-[:STATED]->(f:Fact) WHERE f.valid_from >= $cutoff "
-        "} RETURN p.name",
+        "MATCH (p:Person) "
+        "OPTIONAL MATCH (p)-[:STATED]->(f:Fact) WHERE f.valid_from >= $cutoff "
+        "WITH p, collect(f) AS recent_facts "
+        "WHERE size(recent_facts) = 0 "
+        "RETURN p.name",
         {"cutoff": _days_ago(7)},
     )
     silence = [r[0] for r in silence_rows] or ["Everyone has been active"]

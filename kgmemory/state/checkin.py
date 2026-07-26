@@ -138,10 +138,11 @@ async def _find_people_needing_check_in(store: GraphStore) -> list[tuple[str, di
     rows = await store.query(
         "MATCH (p:Person)-[:STATED]->(c:Fact) "
         "WHERE c.temporal_status = 'current' AND c.fact_kind = 'commitment' "
-        "AND NOT EXISTS { "
-        "  MATCH (p)-[:STATED]->(recent:Fact) "
-        "  WHERE recent.temporal_status = 'current' AND recent.valid_from >= $cutoff "
-        "} "
+        "WITH p, c "
+        "OPTIONAL MATCH (p)-[:STATED]->(recent:Fact) "
+        "WHERE recent.temporal_status = 'current' AND recent.valid_from >= $cutoff "
+        "WITH p, collect(recent) AS recents "
+        "WHERE size(recents) = 0 "
         "RETURN DISTINCT p.name",
         {"cutoff": cutoff},
     )

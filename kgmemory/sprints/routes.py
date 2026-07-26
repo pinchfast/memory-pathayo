@@ -44,50 +44,9 @@ async def create_sprint_endpoint(payload: SprintCreateRequest, org: Organization
     return await create_sprint(store, payload.project, payload.goal, payload.sprint_days, payload.start_date)
 
 
-@router.post("/{sprint_id}/plan", summary="AI plans sprint tasks based on capacity",
-             description="The PM analyzes team capacity, task dependencies, and priorities to select tasks for this sprint.",
-             responses=ORG_PROTECTED_RESPONSES, openapi_extra={"security": [{"OrgAPIKey": []}]})
-async def plan_sprint_endpoint(sprint_id: str, org: Organization = Depends(get_current_org)):
-    store = await get_org_store(org.graph_name)
-    result = await plan_sprint(store, sprint_id)
-    if "error" in result:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=result["error"])
-    return result
-
-
-@router.get("/{sprint_id}", summary="Get sprint details with tasks",
-             responses=ORG_PROTECTED_RESPONSES, openapi_extra={"security": [{"OrgAPIKey": []}]})
-async def get_sprint_endpoint(sprint_id: str, org: Organization = Depends(get_current_org)):
-    store = await get_org_store(org.graph_name)
-    sprint = await get_sprint(store, sprint_id)
-    if sprint is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sprint not found")
-    return sprint
-
-
-@router.get("/", summary="List sprints", responses=ORG_PROTECTED_RESPONSES,
-             openapi_extra={"security": [{"OrgAPIKey": []}]})
-async def list_sprints_endpoint(
-    org: Organization = Depends(get_current_org),
-    project: str | None = Query(None, max_length=200),
-):
-    store = await get_org_store(org.graph_name)
-    return await list_sprints(store, project)
-
-
-@router.post("/{sprint_id}/retrospective", summary="Run sprint retrospective",
-             description="The PM analyzes what went well, what didn't, and generates lessons learned.",
-             responses=ORG_PROTECTED_RESPONSES, openapi_extra={"security": [{"OrgAPIKey": []}]})
-async def retrospective_endpoint(sprint_id: str, org: Organization = Depends(get_current_org)):
-    store = await get_org_store(org.graph_name)
-    result = await review_sprint(store, sprint_id)
-    if "error" in result:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=result["error"])
-    return result
-
+# Static routes must come before /{sprint_id} to avoid being caught by it
 
 # Milestones
-
 
 @router.post("/milestones", summary="Create a milestone", responses=ORG_PROTECTED_RESPONSES,
              openapi_extra={"security": [{"OrgAPIKey": []}]})
@@ -118,7 +77,6 @@ async def roadmap_endpoint(
 
 # Capacity
 
-
 @router.get("/capacity", summary="Capacity forecast — upcoming work vs available hours",
              description="Forecasts team capacity against upcoming work. Warns if overcommitted and suggests what to defer.",
              responses=ORG_PROTECTED_RESPONSES, openapi_extra={"security": [{"OrgAPIKey": []}]})
@@ -129,3 +87,47 @@ async def capacity_endpoint(
 ):
     store = await get_org_store(org.graph_name)
     return await capacity_forecast(store, project, weeks)
+
+
+# Dynamic routes (must come after static routes)
+
+@router.get("/", summary="List sprints", responses=ORG_PROTECTED_RESPONSES,
+             openapi_extra={"security": [{"OrgAPIKey": []}]})
+async def list_sprints_endpoint(
+    org: Organization = Depends(get_current_org),
+    project: str | None = Query(None, max_length=200),
+):
+    store = await get_org_store(org.graph_name)
+    return await list_sprints(store, project)
+
+
+@router.post("/{sprint_id}/plan", summary="AI plans sprint tasks based on capacity",
+             description="The PM analyzes team capacity, task dependencies, and priorities to select tasks for this sprint.",
+             responses=ORG_PROTECTED_RESPONSES, openapi_extra={"security": [{"OrgAPIKey": []}]})
+async def plan_sprint_endpoint(sprint_id: str, org: Organization = Depends(get_current_org)):
+    store = await get_org_store(org.graph_name)
+    result = await plan_sprint(store, sprint_id)
+    if "error" in result:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=result["error"])
+    return result
+
+
+@router.get("/{sprint_id}", summary="Get sprint details with tasks",
+             responses=ORG_PROTECTED_RESPONSES, openapi_extra={"security": [{"OrgAPIKey": []}]})
+async def get_sprint_endpoint(sprint_id: str, org: Organization = Depends(get_current_org)):
+    store = await get_org_store(org.graph_name)
+    sprint = await get_sprint(store, sprint_id)
+    if sprint is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sprint not found")
+    return sprint
+
+
+@router.post("/{sprint_id}/retrospective", summary="Run sprint retrospective",
+             description="The PM analyzes what went well, what didn't, and generates lessons learned.",
+             responses=ORG_PROTECTED_RESPONSES, openapi_extra={"security": [{"OrgAPIKey": []}]})
+async def retrospective_endpoint(sprint_id: str, org: Organization = Depends(get_current_org)):
+    store = await get_org_store(org.graph_name)
+    result = await review_sprint(store, sprint_id)
+    if "error" in result:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=result["error"])
+    return result
