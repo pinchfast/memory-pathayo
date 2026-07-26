@@ -54,13 +54,16 @@ async def continue_project_intake(
     we ingest their response, extract facts, and generate the next question.
     """
     # Ingest the founder's response
+    from kgmemory.memory.schemas import IngestRequest
     await ingest_message(
-        graph_name=graph_name,
-        channel="project_intake",
-        speaker=founder,
-        speaker_role="founder",
-        message=message,
-        project=project_name,
+        graph_name,
+        IngestRequest(
+            channel="project_intake",
+            speaker=founder,
+            speaker_role="founder",
+            message=message,
+            project=project_name,
+        ),
     )
 
     # Check if we can extract a project name from the conversation

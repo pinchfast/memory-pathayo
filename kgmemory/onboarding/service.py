@@ -64,13 +64,16 @@ async def continue_onboarding(
     next question (or move to the next step).
     """
     # Ingest the engineer's response as a conversation to extract facts
+    from kgmemory.memory.schemas import IngestRequest
     await ingest_message(
-        graph_name=graph_name,
-        channel="onboarding",
-        speaker=name,
-        speaker_role="engineer",
-        message=message,
-        project=None,
+        graph_name,
+        IngestRequest(
+            channel="onboarding",
+            speaker=name,
+            speaker_role="engineer",
+            message=message,
+            project=None,
+        ),
     )
 
     # Get what we know about this person so far

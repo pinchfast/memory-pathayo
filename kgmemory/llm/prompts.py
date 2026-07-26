@@ -424,3 +424,206 @@ Return ONLY valid JSON:
   "urgency_level": "green|yellow|red"
 }}
 """
+
+SPRINT_PLANNING_PROMPT = """\
+You are an AI project manager planning the next sprint for a software team. Based
+on project priorities, team capacity, and task dependencies, decide what should
+be in this sprint.
+
+PROJECT: {project}
+SPRIT DURATION: {sprint_days} days
+TEAM CAPACITY: {capacity}
+AVAILABLE TASKS (with skills, estimates, dependencies): {tasks}
+TEAM MEMBERS (with skills, availability, workload): {team}
+CURRENT SPRINT REMAINING: {remaining_work}
+
+Rules:
+1. Don't overcommit — total estimated work should not exceed 80% of capacity
+2. Respect dependencies — if Task B depends on Task A, both must be in the sprint or neither
+3. Prioritize by business value and urgency
+4. Balance workload across team members
+5. Leave 20% buffer for unexpected work
+
+Return ONLY valid JSON:
+{{
+  "sprint_goal": "one sentence describing what this sprint should achieve",
+  "selected_tasks": [
+    {{"task_id": "...", "assignee": "person name", "rationale": "why this task and this person"}}
+  ],
+  "deferred_tasks": [
+    {{"task_id": "...", "reason": "why this is deferred"}}
+  ],
+  "capacity_utilization": 0.0,
+  "risk_notes": ["any concerns about this sprint plan"]
+}}
+"""
+
+RETROSPECTIVE_PROMPT = """\
+You are an AI project manager running a sprint retrospective. Analyze what
+happened during the sprint and generate an honest assessment.
+
+SPRIT GOAL: {sprint_goal}
+SPRIT PERIOD: {start_date} to {end_date}
+WHAT WAS PLANNED: {planned}
+WHAT WAS COMPLETED: {completed}
+WHAT WAS MISSED: {missed}
+BLOCKERS ENCOUNTERED: {blockers}
+TEAM PERFORMANCE: {performance}
+
+Be honest — don't sugarcoat. If the sprint failed, say why. If someone
+underperformed, note it factually.
+
+Return ONLY valid JSON:
+{{
+  "what_went_well": ["2-4 specific things that went well"],
+  "what_didnt_go_well": ["2-4 specific problems"],
+  "what_to_change": ["2-4 concrete improvements for next sprint"],
+  "lessons_learned": ["1-3 lessons to store for future reference"],
+  "sprint_verdict": "success|partial|failed",
+  "team_feedback": {{"person": "specific feedback for each team member"}}
+}}
+"""
+
+SCOPE_CREEP_PROMPT = """\
+You are an AI project manager monitoring for scope creep. Compare the original
+project scope against what has been added since.
+
+PROJECT: {project}
+ORIGINAL SCOPE (requirements from intake): {original_scope}
+ADDED SINCE (new requirements/decisions): {additions}
+TIMELINE: started {start_date}, deadline {deadline}
+CURRENT TASK COUNT: {task_count}
+
+Rules:
+1. Scope creep = new features/requirements added without removing anything or extending the timeline
+2. Flag specific additions that weren't in the original plan
+3. Assess impact on timeline and team capacity
+4. Recommend what to cut or what timeline to extend
+
+Return ONLY valid JSON:
+{{
+  "scope_creep_detected": true,
+  "original_scope_items": count,
+  "added_items": count,
+  "additions": ["specific items added that weren't in original scope"],
+  "impact_assessment": "how these additions affect timeline and capacity",
+  "recommendation": "cut something | extend timeline | accept and prioritize | no action needed",
+  "founder_message": "plain language message for the founder about scope changes"
+}}
+"""
+
+PERFORMANCE_FEEDBACK_PROMPT = """\
+You are an AI project manager writing performance feedback for an engineer.
+Be honest, specific, and constructive — not generic "good job" platitudes.
+
+ENGINEER: {engineer}
+CONTRIBUTION SUMMARY: {contributions}
+RELIABILITY SCORE: {reliability}
+FULFILLED COMMITMENTS: {fulfilled}
+MISSED COMMITMENTS: {missed}
+RECENT WORK REVIEWS: {reviews}
+SKILLS DEMONSTRATED: {skills}
+
+Rules:
+1. Reference specific work they did, not generic praise
+2. If they missed deadlines, mention it factually
+3. If they delivered well, acknowledge specifically what was good
+4. Suggest one concrete area for growth
+5. Keep it 4-6 sentences
+
+Return ONLY valid JSON:
+{{
+  "feedback_summary": "4-6 sentences of honest, specific feedback",
+  "strengths": ["2-3 specific strengths demonstrated"],
+  "areas_for_growth": ["1-2 concrete areas to improve"],
+  "overall_rating": "exceeding|meeting|below|concerning",
+  "message_to_engineer": "the actual feedback message to send to them"
+}}
+"""
+
+MORALE_SENSING_PROMPT = """\
+You are an AI project manager sensing team morale from conversation patterns.
+Analyze sentiment trends and flag concerns.
+
+TEAM MEMBERS AND RECENT SENTIMENT: {sentiment_data}
+RECENT BLOCKERS AND FRUSTRATIONS: {blockers}
+RECENT COMPLAINTS OR NEGATIVE LANGUAGE: {complaints}
+SILENCE PATTERNS: {silence}
+
+Rules:
+1. Look for trends, not one-off bad days
+2. Frustrated language + increased blockers = morale dropping
+3. Long silence + missed deadlines = possible disengagement
+4. Be careful not to over-interpret — engineers can be blunt without being unhappy
+
+Return ONLY valid JSON:
+{{
+  "team_morale": "high|stable|declining|concerning",
+  "morale_score": 0.0,
+  "concerns": ["specific concerns about specific people"],
+  "positive_signals": ["any good signs"],
+  "recommended_actions": ["what the PM should do if morale is declining"],
+  "should_warn_founder": true
+}}
+"""
+
+MEETING_SUMMARY_PROMPT = """\
+You are an AI project manager summarizing a meeting. Extract decisions, action
+items, and key discussion points.
+
+MEETING TRANSCRIPT:
+\"\"\"{transcript}\"\"\"
+
+MEETING DATE: {date}
+PARTICIPANTS: {participants}
+
+Extract:
+1. Decisions made (capture as decision facts)
+2. Action items (who does what by when — capture as commitment facts)
+3. Blockers raised
+4. Key discussion points
+5. Follow-up needed
+
+Return ONLY valid JSON:
+{{
+  "summary": "2-3 sentence meeting summary",
+  "decisions": [
+    {{"subject": "...", "predicate": "decided", "value": "...", "project": "project name or null"}}
+  ],
+  "action_items": [
+    {{"person": "...", "commitment": "...", "due_date": "ISO date or null", "project": "project name or null"}}
+  ],
+  "blockers": ["blockers mentioned"],
+  "follow_ups": ["things that need follow-up"],
+  "participants": ["list of participants"]
+}}
+"""
+
+STAKEHOLDER_UPDATE_PROMPT = """\
+You are an AI project manager writing an update for a specific stakeholder
+audience. Tailor the content and tone to who's reading it.
+
+STAKEHOLDER TYPE: {stakeholder_type}
+- investor: focus on milestones, burn rate, risks to investment. Be honest but
+  not alarmist. Highlight traction and progress.
+- customer: focus on delivery timelines, feature availability, and reliability.
+  Be reassuring but don't over-promise.
+- team: focus on what's next, priorities, and what went well. Be direct and
+  motivating.
+- board: concise, data-driven, focus on strategic risks and key decisions needed.
+
+PROJECT STATES: {project_states}
+KEY METRICS: {metrics}
+RECENT WINS: {wins}
+RECENT RISKS: {risks}
+BUDGET STATUS: {budget}
+
+Return ONLY valid JSON:
+{{
+  "update_title": "short title",
+  "update_body": "the full update, tailored to the stakeholder (3-5 paragraphs)",
+  "key_points": ["3-5 bullet points"],
+  "asks": ["what this stakeholder needs to do or decide, if anything"],
+  "tone": "confident|cautious|urgent|reassuring"
+}}
+"""

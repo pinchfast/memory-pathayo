@@ -1,6 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from pydantic import BaseModel, Field
 
 from kgmemory.core.openapi import ORG_PROTECTED_RESPONSES
 from kgmemory.graph.client import get_org_store
@@ -235,3 +236,30 @@ async def invalidate_fact(fact_id: str, org: Organization = Depends(get_current_
     repo = FactRepository(await get_org_store(org.graph_name))
     if not await repo.invalidate_fact(fact_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fact not found")
+
+
+class MeetingSummaryRequest(BaseModel):
+    transcript: str = Field(..., min_length=10, max_length=50000, description="Full meeting transcript")
+    participants: list[str] = Field(default_factory=list, max_length=50, description="List of participant names")
+    date: str | None = Field(None, description="Meeting date (ISO format)")
+    project: str | None = Field(None, max_length=200, description="Project name if applicable")
+
+
+@router.post(
+    "/meetings/summarize",
+    summary="Summarize a meeting — extract decisions, action items, blockers",
+    description=(
+        "Ingest a meeting transcript. The PM extracts decisions, action items "
+        "(who does what by when), blockers, and key discussion points. "
+        "Decisions and commitments are stored as facts in the knowledge graph."
+    ),
+    responses=ORG_PROTECTED_RESPONSES,
+    openapi_extra={"security": [{"OrgAPIKey": []}]},
+)
+async def summarize_meeting_endpoint(
+    payload: MeetingSummaryRequest, org: Organization = Depends(get_current_org)
+):
+    from .meetings import summarize_meeting
+    return await summarize_meeting(
+        org.graph_name, payload.transcript, payload.participants, payload.date, payload.project
+    )

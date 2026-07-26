@@ -75,7 +75,31 @@ TAGS_METADATA = [
     {
         "name": "health",
         "description": "Liveness (`/health`) and readiness (`/health/ready`) probes checking "
-        "Postgres, Redis/SAQ worker, and FalkorDB.",
+        "Postgres, Redis/SAQ worker, FalkorDB, LLM API, and embedding API.",
+    },
+    {
+        "name": "sprints",
+        "description": "Sprint planning, milestone tracking, retrospectives, and capacity "
+        "forecasting. The PM breaks projects into timeboxed sprints, plans tasks "
+        "based on team capacity, runs retrospectives, and tracks milestones.",
+    },
+    {
+        "name": "planning",
+        "description": "Scope management, dependency analysis, estimation tracking, and task "
+        "prioritization. Detects scope creep, finds critical paths, tracks who "
+        "underestimates, and ranks tasks by priority.",
+    },
+    {
+        "name": "team",
+        "description": "Performance feedback and team morale sensing. Generates honest, "
+        "specific feedback for each engineer and detects declining morale from "
+        "conversation sentiment patterns.",
+    },
+    {
+        "name": "stakeholders",
+        "description": "Stakeholder communication and budget tracking. Generates tailored "
+        "updates for investors, customers, team, or board. Tracks project budget, "
+        "burn rate, and runway.",
     },
 ]
 

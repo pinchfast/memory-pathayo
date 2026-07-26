@@ -19,9 +19,13 @@ from .monitor.routes import router as monitor_router
 from .onboarding.routes import router as onboarding_router
 from .orgs.routes import router as orgs_router
 from .people.routes import router as people_router
+from .planning.routes import router as planning_router
 from .projects.routes import router as projects_router
 from .reports.routes import router as reports_router
+from .sprints.routes import router as sprints_router
+from .stakeholders.routes import router as stakeholders_router
 from .state.routes import router as state_router
+from .team.routes import router as team_router
 from .users.routes import router as users_router
 
 DESCRIPTION = """\
@@ -152,9 +156,13 @@ def get_application() -> FastAPI:
     _app.include_router(context_router, prefix="/v1")
     _app.include_router(onboarding_router, prefix="/v1")
     _app.include_router(people_router, prefix="/v1")
+    _app.include_router(planning_router, prefix="/v1")
     _app.include_router(projects_router, prefix="/v1")
     _app.include_router(reports_router, prefix="/v1")
+    _app.include_router(sprints_router, prefix="/v1")
+    _app.include_router(stakeholders_router, prefix="/v1")
     _app.include_router(state_router, prefix="/v1")
+    _app.include_router(team_router, prefix="/v1")
     _app.include_router(health_router, prefix="/v1")
     _app.include_router(metrics_router)
     register_db(_app)
