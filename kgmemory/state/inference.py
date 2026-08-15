@@ -80,7 +80,10 @@ async def _collect_project_signals(store: GraphStore) -> dict[str, dict[str, Any
         elif kind == "status_update":
             bucket["completed"].append({"speaker": speaker, "value": value, "valid_from": valid_from})
         elif kind == "performance":
-            bucket["missed"].append({"speaker": speaker, "value": value, "valid_from": valid_from})
+            # Only count as missed if it explicitly mentions a deadline miss
+            v = (value or "").lower()
+            if any(w in v for w in ["missed", "overdue", "late", "failed", "blocked"]):
+                bucket["missed"].append({"speaker": speaker, "value": value, "valid_from": valid_from})
         elif kind == "blocker":
             bucket["blockers"].append({"speaker": speaker, "value": value})
         if speaker:
@@ -117,7 +120,12 @@ async def _collect_person_signals(store: GraphStore) -> dict[str, dict[str, Any]
         elif kind == "status_update":
             bucket["completed"].append({"value": value, "valid_from": valid_from})
         elif kind == "performance":
-            bucket["missed"].append({"value": value, "valid_from": valid_from})
+            # Performance facts are observations about work quality, NOT
+            # missed deadlines. Only count as missed if the value explicitly
+            # mentions a deadline miss or failure.
+            v = (value or "").lower()
+            if any(w in v for w in ["missed", "overdue", "late", "failed", "blocked"]):
+                bucket["missed"].append({"value": value, "valid_from": valid_from})
         if valid_from and (bucket["last_seen"] is None or valid_from > bucket["last_seen"]):
             bucket["last_seen"] = valid_from
     return signals
