@@ -6,7 +6,8 @@ RUN pip install --no-cache-dir uv
 
 COPY pyproject.toml ./
 COPY kgmemory ./kgmemory
-RUN uv export --no-dev --no-hashes --no-editable -o requirements.txt
+RUN uv export --no-dev --no-hashes --no-editable -o requirements.txt \
+    && grep -v -E '^\.' requirements.txt > /tmp/req-clean.txt && mv /tmp/req-clean.txt requirements.txt
 
 FROM python:3.14-slim
 
@@ -22,6 +23,6 @@ RUN pip install --no-cache-dir -r /code/requirements.txt
 
 COPY . /code
 
-EXPOSE 80
+EXPOSE 8001
 
 CMD ["python", "manage.py", "run-prod-server"]
