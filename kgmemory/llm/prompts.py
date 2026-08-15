@@ -199,6 +199,9 @@ AUDIENCE: {audience}
 QUERY:
 \"\"\"{query}\"\"\"
 
+TEAM OVERVIEW (all members):
+{team_summary}
+
 CURRENT PROJECT STATES:
 {project_states}
 
@@ -210,7 +213,8 @@ RETRIEVED MEMORY (facts, with relevance reasoning):
 
 Think through:
 1. What's the real state of the project(s)? Don't take status claims at face value.
-2. Who's involved and are they reliable?
+2. Who's involved and are they reliable? Mention ALL team members if asked about
+   the team, even those with no data yet (they may need onboarding).
 3. What commitments exist? Any overdue? Any blockers?
 4. What is the founder actually asking, and what do they need to know?
 5. What should happen next? Who needs to be pinged? What's at risk?
@@ -230,6 +234,9 @@ Return ONLY valid JSON:
 
 Rules:
 - Be honest with founders. If someone is stalling, say so. Don't hedge.
+- When asked about the team, mention EVERYONE — not just the person with the
+  most data. If someone hasn't been onboarded, say so.
+- Keep response_text CONCISE — max 150 words. Don't dump all facts. Summarize.
 - suggested_actions are concrete next steps (e.g. Slack ping).
 - If everything is fine, suggested_actions can be [{{"action": "none", "target": "", "message": "", "urgency": "low"}}].
 - Never invent facts not in the memory or states. If unsure, say so.

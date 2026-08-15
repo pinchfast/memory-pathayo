@@ -70,16 +70,24 @@ async def decide(graph_name: str, request: DecisionRequest) -> dict[str, Any]:
     person_states_text = _format_person_states(context.get("person_states") or [])
     memory_context = context["prompt_context"]
 
+    # Also fetch ALL people so the PM knows the full team, even those
+    # without facts or states yet (e.g. not onboarded)
+    from kgmemory.people.service import list_people
+    store = await get_org_store(graph_name)
+    all_people = await list_people(store)
+    team_summary = _format_team_summary(all_people)
+
     prompt = PM_DECISION_PROMPT.format(
         audience=request.audience,
         query=request.query,
         project_states=project_states_text,
         person_states=person_states_text,
-        memory_context=memory_context,
+        memory_context=memory_context[:2000],
+        team_summary=team_summary,
     )
 
     try:
-        response = await get_llm().complete(prompt, kind="decision", max_tokens=2000)
+        response = await get_llm().complete(prompt, kind="decision", max_tokens=4000)
         payload = parse_json_response(response)
         if not isinstance(payload, dict):
             raise LLMError("Decision payload is not an object")
@@ -154,5 +162,25 @@ def _format_person_states(states: list[dict[str, Any]]) -> str:
         lines.append(
             f"- {state['person']} [{state['credibility']}, score {state['credibility_score']}]: "
             f"{state.get('summary') or 'no summary'} (risks: {signals})"
+        )
+    return "\n".join(lines)
+
+
+def _format_team_summary(people: list[dict[str, Any]]) -> str:
+    if not people:
+        return "(no team members yet)"
+    lines = []
+    for p in people:
+        name = p.get("name", "unknown")
+        role = p.get("role", "unknown")
+        skills = p.get("skill_count", 0)
+        avail = p.get("availability_hours_per_week")
+        reliability = p.get("reliability_score", 0)
+        completed = p.get("completed_count", 0)
+        missed = p.get("missed_count", 0)
+        avail_str = f", {avail} hrs/wk" if avail else ""
+        lines.append(
+            f"- {name} ({role}): {skills} skills{avail_str}, "
+            f"{completed} done, {missed} missed, {int(reliability * 100)}% reliable"
         )
     return "\n".join(lines)
