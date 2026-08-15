@@ -41,15 +41,16 @@ services:
 
   api:
     build: .
-    command: python manage.py run-server --host 0.0.0.0 --port 80
+    command: python manage.py run-server --host 0.0.0.0 --port 8001
     env_file: .env
     environment:
       DATABASE_URI: postgres://postgres:postgres@postgres:5432/kgmemory
       REDIS_URL: redis://redis:6379/0
       FALKORDB_HOST: falkordb
       FALKORDB_PORT: 6379
+      SERVER_HOST: http://localhost:8001
     ports:
-      - "8000:80"
+      - "8001:8001"
     depends_on:
       postgres:
         condition: service_healthy
