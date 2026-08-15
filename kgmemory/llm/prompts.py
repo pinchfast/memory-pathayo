@@ -272,6 +272,7 @@ You're having a real conversation to understand who they are and what they can d
 WHAT WE KNOW SO FAR: {known_info}
 CONVERSATION HISTORY (facts extracted so far): {conversation}
 CURRENT STEP: {step}
+STEPS ALREADY COMPLETED (do NOT re-ask these): {covered_steps}
 THE ENGINEER JUST SAID: "{engineer_message}"
 
 Steps to cover (in order):
@@ -292,6 +293,7 @@ The engineer just replied to your question about "{step}". Decide:
 - If they said something random/off-topic → acknowledge briefly and move on.
 - If this is the first message (no engineer message) → ask the first question
   for the current step.
+- NEVER go back to a step in "STEPS ALREADY COMPLETED". Always move forward.
 
 EXAMPLES of good responses:
 - Engineer says "backend engineer, 2 years" on role_experience →
@@ -317,9 +319,35 @@ Return ONLY valid JSON:
   "message": "what to say to the engineer",
   "extracted_facts": [
     {{"subject": "{name}", "predicate": "short relation", "value": "the fact content",
-      "fact_kind": "skill|availability|preference|identity|fact", "topics": ["slugs"]}}
+      "fact_kind": "skill|availability|preference|identity|experience|project|work_style|fact",
+      "topics": ["slugs"]}}
   ]
 }}
+
+FACT EXTRACTION RULES — these facts build the engineer's profile for the CEO:
+- Extract CLEAN, RESUME-QUALITY facts. Not raw words from their message.
+- fact_kind MUST be one of: identity, skill, experience, availability, preference,
+  project, work_style, fact
+- Use the CORRECT fact_kind:
+  - identity → role/title only. predicate: "has role". value: "AI Engineer"
+  - skill → specific technologies ONLY. predicate: "is skilled in". value: "Python"
+    NEVER put job titles, years, or soft skills here. "AI engineering" is NOT a skill.
+    "3 years" is NOT a skill. Only tools/languages/frameworks.
+  - experience → years of experience. predicate: "has experience". value: "3 years as AI Engineer"
+  - availability → time commitment. predicate: "is available". value: "21 hours/week, Nepal timezone"
+  - preference → interests. predicate: "is interested in". value: "AI and ML research"
+  - project → combine everything about a project into ONE fact.
+    predicate: "built". value: "Knowledge graph memory system using Python, LLM API, RAG, and vector search"
+  - work_style → communication preferences. predicate: "communicates via" or "handles blockers by".
+    value: "Quick calls for blockers" or "Asks teammates when stuck"
+  - fact → location or other useful info. predicate: "is based in". value: "Nepal"
+- DON'T extract duplicates. Check CONVERSATION HISTORY first.
+- DON'T extract fragments. "3 hours daily" → combine with timezone into availability.
+- DON'T put soft skills or interests under "skill". "research" is a preference, not a skill.
+- Predicates must be human-readable: "has role", "is skilled in", "has experience",
+  "is available", "is interested in", "built", "communicates via", "is based in"
+- ONLY extract facts from what the engineer actually said in THIS message.
+  Don't re-extract facts that are already in CONVERSATION HISTORY.
 """
 
 PROJECT_INTAKE_PROMPT = """\

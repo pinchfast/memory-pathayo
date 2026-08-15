@@ -92,12 +92,19 @@ async def continue_onboarding(
 
     # The engineer just said this — pass it explicitly so the LLM can react
     # to it without having to parse it out of the conversation history.
+    # Also pass the list of steps already covered so the LLM doesn't re-ask.
+    covered_steps = _get_covered_steps(current_step)
     result = await _generate_onboarding_response(
         graph_name, name, current_step,
         conversation=conversation, known_info=known_info,
         engineer_message=message,
+        covered_steps=covered_steps,
     )
     actual_next_step = result.get("next_step", current_step)
+    # Don't allow going backwards — if the LLM returns a step we already
+    # covered, force it forward to the current step's next
+    if actual_next_step in covered_steps and actual_next_step != current_step:
+        actual_next_step = _next_step(current_step)
     # Store the step on the Person node so we don't lose track
     await store.query(
         "MATCH (p:Person) WHERE toLower(p.name) = $name "
@@ -165,6 +172,7 @@ async def _generate_onboarding_response(
     conversation: str,
     known_info: str,
     engineer_message: str = "",
+    covered_steps: list[str] | None = None,
 ) -> dict[str, Any]:
     """Generate the next onboarding message using the LLM."""
     prompt = ENGINEER_ONBOARDING_PROMPT.format(
@@ -173,6 +181,7 @@ async def _generate_onboarding_response(
         conversation=conversation or "(start of conversation)",
         step=step,
         engineer_message=engineer_message or "(no message yet — this is the first question)",
+        covered_steps=", ".join(covered_steps) if covered_steps else "none",
     )
 
     try:
@@ -212,6 +221,14 @@ def _next_step(current_step: str) -> str:
         if idx + 1 < len(ONBOARDING_STEPS):
             return ONBOARDING_STEPS[idx + 1]
     return "done"
+
+
+def _get_covered_steps(current_step: str) -> list[str]:
+    """Get all steps that have been completed before the current step."""
+    if current_step in ONBOARDING_STEPS:
+        idx = ONBOARDING_STEPS.index(current_step)
+        return ONBOARDING_STEPS[:idx]
+    return []
 
 
 def _format_known_info(person: dict[str, Any]) -> str:
