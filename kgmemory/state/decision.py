@@ -93,8 +93,17 @@ async def decide(graph_name: str, request: DecisionRequest) -> dict[str, Any]:
             raise LLMError("Decision payload is not an object")
     except Exception as exc:
         logger.exception(f"Decision synthesis failed: {exc}")
+        # Build a clean fallback from team summary + person states
+        # instead of dumping raw memory context
+        fallback_parts = []
+        if team_summary and team_summary != "(no team members yet)":
+            fallback_parts.append(f"Here's what I know about the team:\n{team_summary}")
+        if person_states_text and person_states_text != "(no person states inferred yet)":
+            fallback_parts.append(f"\nTeam status:\n{person_states_text}")
+        if not fallback_parts:
+            fallback_parts.append("I'm still learning about your team. Try asking me again in a moment.")
         payload = {
-            "response_text": "I couldn't fully analyze this just now. Here's what I know:\n" + memory_context,
+            "response_text": "\n".join(fallback_parts),
             "reasoning": f"LLM synthesis failed: {exc}",
             "suggested_actions": [{"action": "none", "target": "", "message": "", "urgency": "low"}],
             "risk_level": "medium",
