@@ -199,7 +199,7 @@ AUDIENCE: {audience}
 QUERY:
 \"\"\"{query}\"\"\"
 
-TEAM OVERVIEW (all members):
+TEAM OVERVIEW (all members, with their actual skills):
 {team_summary}
 
 CURRENT PROJECT STATES:
@@ -219,14 +219,28 @@ Think through:
 4. What is the founder actually asking, and what do they need to know?
 5. What should happen next? Who needs to be pinged? What's at risk?
 
+PLANNING MODE — if the founder is describing a new project, product, or feature
+they want to build (e.g. "I want to build X", "let's make Y", "can we add Z"):
+1. Break the idea into 3-6 concrete tasks. Think about what actually needs to
+   happen — backend, frontend, database, API, auth, deployment, etc.
+2. For each task, match it to the team member whose skills fit best. Look at
+   the actual skills listed in TEAM OVERVIEW. If nobody has the right skill,
+   say so — don't fake an assignment.
+3. Consider availability — if someone has 0 hrs/week, don't assign to them.
+4. Present the plan in plain language. Show who does what and why.
+5. Suggest actions: create_task for each task, assign_task to match people,
+   and check_in_engineer to ping them on Slack about the new work.
+6. If there's no team yet, say "I need to onboard your team first" and suggest
+   onboarding instead of making up assignments.
+
 Return ONLY valid JSON:
 {{
   "response_text": "the response to send to the audience",
   "reasoning": "your internal reasoning, 3-6 sentences",
   "suggested_actions": [
-    {{"action": "ping|escalate|reassign|warn_founder|schedule|none",
-      "target": "person or project",
-      "message": "what to say or do",
+    {{"action": "ping|escalate|reassign|warn_founder|schedule|create_task|assign_task|check_in_engineer|onboard|none",
+      "target": "person or project name",
+      "message": "what to say or do — for create_task include the task title and required skills, for assign_task include person name and task, for check_in_engineer include what to ask them",
       "urgency": "low|medium|high"}}
   ],
   "risk_level": "low|medium|high"
@@ -236,7 +250,7 @@ Rules:
 - Be honest with founders. If someone is stalling, say so. Don't hedge.
 - When asked about the team, mention EVERYONE — not just the person with the
   most data. If someone hasn't been onboarded, say so.
-- Keep response_text CONCISE — max 150 words. Don't dump all facts. Summarize.
+- Keep response_text CONCISE — max 200 words. Don't dump all facts. Summarize.
 - NEVER invent facts. Only state things that are explicitly in the memory,
   person states, or team summary. If you don't have data, say "I don't have
   enough info yet" — don't guess.
@@ -245,7 +259,10 @@ Rules:
   there is a fact saying so.
 - Distinguish between "vague updates" (low quality info) and "missed
   deadlines" (a specific failure). They are different things.
-- suggested_actions are concrete next steps (e.g. Slack ping).
+- When planning tasks, ONLY assign to people who exist in TEAM OVERVIEW and
+  have matching skills. If the team is empty or not onboarded, say so.
+- suggested_actions are concrete next steps. For planning, use create_task
+  and assign_task actions with specific task descriptions.
 - If everything is fine, suggested_actions can be [{{"action": "none", "target": "", "message": "", "urgency": "low"}}].
 - response_text must match the audience's level. No jargon in response_text.
 - Talk like a normal person. No corporate speak.

@@ -182,14 +182,15 @@ def _format_team_summary(people: list[dict[str, Any]]) -> str:
     for p in people:
         name = p.get("name", "unknown")
         role = p.get("role", "unknown")
-        skills = p.get("skill_count", 0)
+        skills = p.get("skills") or []
         avail = p.get("availability_hours_per_week")
         reliability = p.get("reliability_score", 0)
         completed = p.get("completed_count", 0)
         missed = p.get("missed_count", 0)
         avail_str = f", {avail} hrs/wk" if avail else ""
+        skills_str = ", ".join(skills[:10]) if skills else "no skills listed"
         lines.append(
-            f"- {name} ({role}): {skills} skills{avail_str}, "
+            f"- {name} ({role}): skills=[{skills_str}]{avail_str}, "
             f"{completed} done, {missed} missed, {int(reliability * 100)}% reliable"
         )
     return "\n".join(lines)
