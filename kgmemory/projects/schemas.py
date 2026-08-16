@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ProjectCreate(BaseModel):
@@ -15,11 +15,16 @@ class ProjectCreate(BaseModel):
 class ProjectRead(BaseModel):
     name: str
     description: str | None
-    status: str
+    status: str | None = None
     deadline: str | None
     task_count: int
     open_task_count: int
     member_count: int
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def _default_status(cls, v):
+        return v or "planning"
 
 
 class TaskCreate(BaseModel):

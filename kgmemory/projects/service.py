@@ -24,7 +24,7 @@ async def list_projects(store: GraphStore) -> list[dict[str, Any]]:
         "OPTIONAL MATCH (p)<-[:PART_OF]-(t:Task) "
         "OPTIONAL MATCH (p)<-[:ABOUT_PROJECT]-(f:Fact) "
         "WITH p, collect(DISTINCT t) AS tasks, collect(DISTINCT f) AS facts "
-        "RETURN p.name, p.description, p.status, p.deadline, "
+        "RETURN p.name, p.description, coalesce(p.status, 'planning'), p.deadline, "
         "size(tasks), size([t IN tasks WHERE t.status <> 'done']), size(facts)"
     )
     return [

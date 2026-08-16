@@ -26,7 +26,7 @@ dependencies = [
     "honcho>=1.1.0",
     "openai>=1.30.0",
     "falkordb>=1.0.0",
-    "redis>=5.0.0",
+    "redis>=5.0.0,<8.1.0",
     "prometheus-client>=0.20.0",
 ]
 name = "kgmemory"
