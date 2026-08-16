@@ -278,6 +278,7 @@ REASON FOR CHECK-IN: {reason}
 THEIR OPEN COMMITMENTS: {commitments}
 THEIR LAST SEEN: {last_seen}
 RECENT FACTS FROM THEM: {recent_facts}
+YOUR PREVIOUS CHECK-IN MESSAGES TO THEM: {previous_checkins}
 
 Rules:
 - Talk like a normal person on Slack. Short, casual.
@@ -287,6 +288,13 @@ Rules:
 - Keep it to 2-4 sentences. Don't write a paragraph.
 - No corporate speak. No "I wanted to touch base." No "Just checking in!"
 - Be direct but not aggressive. You're a PM, not their boss's boss.
+- CRITICAL: Do NOT repeat questions you already asked in previous check-ins.
+  If you previously asked "What's your progress on X?", ask something different
+  this time. Reference new information or a different angle.
+- If you've checked in multiple times before and they haven't responded, vary
+  your approach — try a different tone, ask about a different topic, or just
+  say something brief without a question.
+- Don't start every message with "Hey {person}". Vary your openers.
 
 Return ONLY valid JSON:
 {{

@@ -36,12 +36,17 @@ async def check_in_person(graph_name: str, person: str) -> dict[str, Any]:
         }
 
     check_in = await _generate_check_in_message(person, reason, signals)
+    check_in_msg = check_in.get("check_in_message", "")
+    # Store the check-in message as a fact so the PM remembers what it asked
+    # and doesn't repeat the same question next time.
+    if check_in_msg:
+        await _record_check_in(store, person, check_in_msg)
     elapsed = int((time.perf_counter() - started) * 1000)
     return {
         "person": person,
         "needed": True,
         "reason": reason,
-        "check_in_message": check_in.get("check_in_message", ""),
+        "check_in_message": check_in_msg,
         "tone": check_in.get("tone", "friendly_concerned"),
         "specific_questions": check_in.get("specific_questions", []),
         "open_commitments": signals["commitments"],
@@ -70,11 +75,15 @@ async def check_in_auto(graph_name: str) -> dict[str, Any]:
         if reason is None:
             continue
         check_in = await _generate_check_in_message(person_name, reason, signals)
+        check_in_msg = check_in.get("check_in_message", "")
+        # Store the check-in message so the PM doesn't repeat it next time
+        if check_in_msg:
+            await _record_check_in(store, person_name, check_in_msg)
         check_ins.append({
             "person": person_name,
             "needed": True,
             "reason": reason,
-            "check_in_message": check_in.get("check_in_message", ""),
+            "check_in_message": check_in_msg,
             "tone": check_in.get("tone", "friendly_concerned"),
             "specific_questions": check_in.get("specific_questions", []),
             "open_commitments": signals["commitments"],
@@ -122,6 +131,16 @@ async def _collect_person_signals(store: GraphStore, person: str) -> dict[str, A
         if valid_from and (last_seen is None or valid_from > last_seen):
             last_seen = valid_from
 
+    # Collect previous check-in messages so the PM doesn't repeat itself.
+    # Check-in messages are stored as facts with kind "check_in".
+    prev_checkins = await store.query(
+        "MATCH (p:Person)-[:STATED]->(f:Fact) "
+        "WHERE toLower(p.name) = $person AND f.fact_kind = 'check_in' "
+        "RETURN f.value ORDER BY f.valid_from DESC LIMIT 3",
+        {"person": person_lower},
+    )
+    previous_checkins = [row[0] for row in prev_checkins if row[0]]
+
     days_since = _days_since(last_seen)
     return {
         "commitments": commitments,
@@ -129,12 +148,21 @@ async def _collect_person_signals(store: GraphStore, person: str) -> dict[str, A
         "last_seen": last_seen,
         "days_since_last_seen": days_since,
         "has_overdue": has_overdue,
+        "previous_checkins": previous_checkins,
     }
 
 
 async def _find_people_needing_check_in(store: GraphStore) -> list[tuple[str, dict[str, Any]]]:
-    """Find all people who need a check-in based on silence + open commitments."""
+    """Find all people who need a check-in based on silence + open commitments.
+
+    Two groups:
+    1. People with open commitments who've been silent (priority)
+    2. People who've been silent for the threshold period even without commitments
+       (casual check-in to maintain engagement)
+    """
     cutoff = (datetime.now(timezone.utc) - timedelta(days=SILENCE_THRESHOLD_DAYS)).isoformat()
+
+    # Group 1: people with open commitments who haven't been seen recently
     rows = await store.query(
         "MATCH (p:Person)-[:STATED]->(c:Fact) "
         "WHERE c.temporal_status = 'current' AND c.fact_kind = 'commitment' "
@@ -146,9 +174,28 @@ async def _find_people_needing_check_in(store: GraphStore) -> list[tuple[str, di
         "RETURN DISTINCT p.name",
         {"cutoff": cutoff},
     )
+
+    # Group 2: people who've been silent for the threshold even without commitments
+    silent_rows = await store.query(
+        "MATCH (p:Person)-[:STATED]->(f:Fact) "
+        "WHERE f.temporal_status = 'current' "
+        "WITH p, max(f.valid_from) AS last_seen "
+        "WHERE last_seen < $cutoff "
+        "RETURN p.name, last_seen",
+        {"cutoff": cutoff},
+    )
+
+    seen_names: set[str] = set()
     results: list[tuple[str, dict[str, Any]]] = []
     for row in rows:
         person_name = row[0]
+        seen_names.add(person_name.lower())
+        signals = await _collect_person_signals(store, person_name)
+        results.append((person_name, signals))
+    for row in silent_rows:
+        person_name = row[0]
+        if person_name.lower() in seen_names:
+            continue
         signals = await _collect_person_signals(store, person_name)
         results.append((person_name, signals))
     return results
@@ -160,13 +207,12 @@ def _derive_check_in_reason(signals: dict[str, Any]) -> str | None:
     has_commitments = bool(signals.get("commitments"))
     has_overdue = signals.get("has_overdue", False)
 
-    if not has_commitments:
-        return None
-
     if has_overdue:
         return "has overdue commitments"
     if days is not None and days >= SILENCE_THRESHOLD_DAYS:
-        return f"has been silent for {days} days while having open commitments"
+        if has_commitments:
+            return f"has been silent for {days} days while having open commitments"
+        return f"has been silent for {days} days — checking in to see how they're doing"
     if has_commitments and days is not None and days >= 2:
         return "has open commitments and hasn't provided a recent update"
     return None
@@ -181,6 +227,8 @@ async def _generate_check_in_message(
     ) or "(none)"
     recent_text = "\n".join(f"- {f}" for f in signals["recent_facts"][:5]) or "(no recent facts)"
     last_seen = signals.get("last_seen") or "never"
+    previous_checkins = signals.get("previous_checkins", [])
+    prev_text = "\n".join(f"- {m}" for m in previous_checkins) or "(none)"
 
     prompt = CHECKIN_PROMPT.format(
         person=person,
@@ -188,6 +236,7 @@ async def _generate_check_in_message(
         commitments=commitments_text,
         last_seen=last_seen,
         recent_facts=recent_text,
+        previous_checkins=prev_text,
     )
     try:
         response = await get_llm().complete(prompt, kind="checkin", max_tokens=600)
@@ -216,3 +265,39 @@ def _days_since(last_seen: str | None) -> int | None:
     except ValueError:
         return None
     return max(0, (datetime.now(timezone.utc) - moment).days)
+
+
+async def _record_check_in(store: GraphStore, person: str, message: str) -> None:
+    """Record a check-in message as a fact so the PM remembers what it asked.
+
+    This prevents the PM from repeating the same question in future check-ins.
+    The fact is stored with fact_kind='check_in' and expires after 14 days
+    so old check-ins don't clutter the graph forever.
+    """
+    now = datetime.now(timezone.utc)
+    expires = (now + timedelta(days=14)).isoformat()
+    person_lower = person.strip().lower()
+    # Truncate the message so it doesn't bloat the graph
+    short_msg = message[:200]
+    try:
+        await store.query(
+            "CREATE (p:Person {name: $person}), (f:Fact {"
+            "  fact_kind: 'check_in', "
+            "  value: $msg, "
+            "  subject: $person, "
+            "  predicate: 'was asked', "
+            "  temporal_status: 'current', "
+            "  valid_from: $now, "
+            "  expires_at: $expires"
+            "}) "
+            "WITH p, f "
+            "MERGE (p)-[:STATED]->(f)",
+            {
+                "person": person_lower,
+                "msg": short_msg,
+                "now": now.isoformat(),
+                "expires": expires,
+            },
+        )
+    except Exception as exc:
+        logger.warning(f"Failed to record check-in for {person}: {exc}")
