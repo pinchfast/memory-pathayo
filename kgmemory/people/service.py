@@ -120,6 +120,7 @@ async def list_people(store: GraphStore) -> list[dict[str, Any]]:
                 "name": name,
                 "role": role,
                 "title": title,
+                "skills": skills or [],
                 "skill_count": len(skills or []),
                 "commitment_count": reliability["commitments"],
                 "completed_count": reliability["completed"],

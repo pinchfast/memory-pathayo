@@ -70,23 +70,40 @@ async def decide(graph_name: str, request: DecisionRequest) -> dict[str, Any]:
     person_states_text = _format_person_states(context.get("person_states") or [])
     memory_context = context["prompt_context"]
 
+    # Also fetch ALL people so the PM knows the full team, even those
+    # without facts or states yet (e.g. not onboarded)
+    from kgmemory.people.service import list_people
+    store = await get_org_store(graph_name)
+    all_people = await list_people(store)
+    team_summary = _format_team_summary(all_people)
+
     prompt = PM_DECISION_PROMPT.format(
         audience=request.audience,
         query=request.query,
         project_states=project_states_text,
         person_states=person_states_text,
-        memory_context=memory_context,
+        memory_context=memory_context[:2000],
+        team_summary=team_summary,
     )
 
     try:
-        response = await get_llm().complete(prompt, kind="decision", max_tokens=2000)
+        response = await get_llm().complete(prompt, kind="decision", max_tokens=4000)
         payload = parse_json_response(response)
         if not isinstance(payload, dict):
             raise LLMError("Decision payload is not an object")
     except Exception as exc:
         logger.exception(f"Decision synthesis failed: {exc}")
+        # Build a clean fallback from team summary + person states
+        # instead of dumping raw memory context
+        fallback_parts = []
+        if team_summary and team_summary != "(no team members yet)":
+            fallback_parts.append(f"Here's what I know about the team:\n{team_summary}")
+        if person_states_text and person_states_text != "(no person states inferred yet)":
+            fallback_parts.append(f"\nTeam status:\n{person_states_text}")
+        if not fallback_parts:
+            fallback_parts.append("I'm still learning about your team. Try asking me again in a moment.")
         payload = {
-            "response_text": "I couldn't fully analyze this just now. Here's what I know:\n" + memory_context,
+            "response_text": "\n".join(fallback_parts),
             "reasoning": f"LLM synthesis failed: {exc}",
             "suggested_actions": [{"action": "none", "target": "", "message": "", "urgency": "low"}],
             "risk_level": "medium",
@@ -154,5 +171,26 @@ def _format_person_states(states: list[dict[str, Any]]) -> str:
         lines.append(
             f"- {state['person']} [{state['credibility']}, score {state['credibility_score']}]: "
             f"{state.get('summary') or 'no summary'} (risks: {signals})"
+        )
+    return "\n".join(lines)
+
+
+def _format_team_summary(people: list[dict[str, Any]]) -> str:
+    if not people:
+        return "(no team members yet)"
+    lines = []
+    for p in people:
+        name = p.get("name", "unknown")
+        role = p.get("role", "unknown")
+        skills = p.get("skills") or []
+        avail = p.get("availability_hours_per_week")
+        reliability = p.get("reliability_score", 0)
+        completed = p.get("completed_count", 0)
+        missed = p.get("missed_count", 0)
+        avail_str = f", {avail} hrs/wk" if avail else ""
+        skills_str = ", ".join(skills[:10]) if skills else "no skills listed"
+        lines.append(
+            f"- {name} ({role}): skills=[{skills_str}]{avail_str}, "
+            f"{completed} done, {missed} missed, {int(reliability * 100)}% reliable"
         )
     return "\n".join(lines)

@@ -46,6 +46,12 @@ async def start_onboarding(
             "is_technical": role in ("engineer", "designer"),
         },
     )
+    # Store the onboarding step on the Person node
+    await store.query(
+        "MATCH (p:Person) WHERE toLower(p.name) = $name "
+        "SET p.onboarding_step = 'role_experience'",
+        {"name": name.strip().lower()},
+    )
 
     # Generate the first question
     result = await _generate_onboarding_response(
@@ -60,8 +66,8 @@ async def continue_onboarding(
     graph_name: str, name: str, message: str, current_step: str
 ) -> dict[str, Any]:
     """Continue the onboarding conversation. The engineer has responded to the
-    last question — we ingest their response, extract facts, and generate the
-    next question (or move to the next step).
+    last question — we ingest their response, extract facts, and let the LLM
+    decide whether to advance to the next step or push back on their answer.
     """
     # Ingest the engineer's response as a conversation to extract facts
     from kgmemory.memory.schemas import IngestRequest
@@ -84,14 +90,29 @@ async def continue_onboarding(
     # Build conversation history from recent facts
     conversation = _format_conversation(person) if person else message
 
-    # Determine the next step
-    next_step = _next_step(current_step)
-
+    # The engineer just said this — pass it explicitly so the LLM can react
+    # to it without having to parse it out of the conversation history.
+    # Also pass the list of steps already covered so the LLM doesn't re-ask.
+    covered_steps = _get_covered_steps(current_step)
     result = await _generate_onboarding_response(
-        graph_name, name, next_step, conversation=conversation, known_info=known_info
+        graph_name, name, current_step,
+        conversation=conversation, known_info=known_info,
+        engineer_message=message,
+        covered_steps=covered_steps,
+    )
+    actual_next_step = result.get("next_step", current_step)
+    # Don't allow going backwards — if the LLM returns a step we already
+    # covered, force it forward to the current step's next
+    if actual_next_step in covered_steps and actual_next_step != current_step:
+        actual_next_step = _next_step(current_step)
+    # Store the step on the Person node so we don't lose track
+    await store.query(
+        "MATCH (p:Person) WHERE toLower(p.name) = $name "
+        "SET p.onboarding_step = $step",
+        {"name": name.strip().lower(), "step": actual_next_step},
     )
     result["person"] = name
-    result["step"] = result.get("next_step", next_step)
+    result["step"] = actual_next_step
     return result
 
 
@@ -102,13 +123,24 @@ async def get_onboarding_status(graph_name: str, name: str) -> dict[str, Any]:
     if not person:
         return {"person": name, "started": False, "step": "not_started", "completed": False}
 
-    # Determine progress based on what facts we have
+    # Read the stored onboarding step from the Person node
+    rows = await store.query(
+        "MATCH (p:Person) WHERE toLower(p.name) = $name "
+        "RETURN p.onboarding_step",
+        {"name": name.strip().lower()},
+    )
+    stored_step = rows[0][0] if rows and rows[0] else None
+
     facts = person.get("facts") or []
     has_skills = any(f.get("fact_kind") == "skill" for f in facts)
     has_availability = any(f.get("fact_kind") == "availability" for f in facts)
     has_preferences = any(f.get("fact_kind") == "preference" for f in facts)
 
-    if has_skills and has_availability and has_preferences:
+    # Use the stored step if available, otherwise fall back to fact inference
+    if stored_step:
+        step = stored_step
+        completed = step == "done"
+    elif has_skills and has_availability and has_preferences:
         step = "done"
         completed = True
     elif has_skills and has_availability:
@@ -139,6 +171,8 @@ async def _generate_onboarding_response(
     step: str,
     conversation: str,
     known_info: str,
+    engineer_message: str = "",
+    covered_steps: list[str] | None = None,
 ) -> dict[str, Any]:
     """Generate the next onboarding message using the LLM."""
     prompt = ENGINEER_ONBOARDING_PROMPT.format(
@@ -146,34 +180,30 @@ async def _generate_onboarding_response(
         known_info=known_info,
         conversation=conversation or "(start of conversation)",
         step=step,
+        engineer_message=engineer_message or "(no message yet — this is the first question)",
+        covered_steps=", ".join(covered_steps) if covered_steps else "none",
     )
 
     try:
-        response = await get_llm().complete(prompt, kind="onboarding", max_tokens=800)
+        response = await get_llm().complete(prompt, kind="onboarding", max_tokens=2000)
         payload = parse_json_response(response)
         if not isinstance(payload, dict):
             raise LLMError("Onboarding payload is not an object")
     except Exception as exc:
         logger.exception(f"Onboarding LLM failed: {exc}")
-        # Fallback: use a static question for the current step
+        # Fallback: use a simple question for the current step (no greeting)
         fallback_questions = {
-            "role_experience": (
-                f"Hi {name}! I'm your AI project manager. What's your current role "
-                "and how many years of experience do you have?"
-            ),
-            "skills": "Great! What technologies, languages, and tools are you most proficient in?",
-            "past_projects": (
-                "Tell me about a recent project you're proud of. "
-                "What did you build and what was your role?"
-            ),
+            "role_experience": "What's your current role and how many years of experience?",
+            "skills": "What technologies and tools are you most proficient in?",
+            "past_projects": "Tell me about a recent project you worked on.",
             "availability": "How many hours per week can you commit, and what's your timezone?",
-            "interests": "What kind of work excites you most? Any areas you want to grow in?",
-            "work_style": "How do you prefer to communicate and how do you handle blockers?",
-            "done": f"Thanks {name}! I've got everything I need. Welcome to the team!",
+            "interests": "What kind of work excites you most?",
+            "work_style": "How do you prefer to communicate and handle blockers?",
+            "done": f"Got it, thanks {name}. That's all I needed.",
         }
         payload = {
             "next_step": step,
-            "message": fallback_questions.get(step, "Tell me more."),
+            "message": fallback_questions.get(step, "Can you tell me more about that?"),
             "extracted_facts": [],
         }
 
@@ -191,6 +221,14 @@ def _next_step(current_step: str) -> str:
         if idx + 1 < len(ONBOARDING_STEPS):
             return ONBOARDING_STEPS[idx + 1]
     return "done"
+
+
+def _get_covered_steps(current_step: str) -> list[str]:
+    """Get all steps that have been completed before the current step."""
+    if current_step in ONBOARDING_STEPS:
+        idx = ONBOARDING_STEPS.index(current_step)
+        return ONBOARDING_STEPS[:idx]
+    return []
 
 
 def _format_known_info(person: dict[str, Any]) -> str:
@@ -213,11 +251,19 @@ def _format_known_info(person: dict[str, Any]) -> str:
 
 
 def _format_conversation(person: dict[str, Any]) -> str:
-    """Format recent facts as a conversation history."""
+    """Format what the engineer has told us so far as conversation context.
+
+    This gives the LLM enough context to know what's already been covered
+    so it doesn't repeat questions and can react to what was said.
+    """
     facts = person.get("facts") or []
     if not facts:
         return "(start of conversation)"
     lines = []
-    for f in facts[:10]:
-        lines.append(f"Engineer stated: {f.get('value')}")
-    return "\n".join(lines)
+    # Show facts in reverse chronological order (most recent first)
+    for f in facts[:20]:
+        predicate = f.get("predicate", "")
+        value = f.get("value", "")
+        kind = f.get("fact_kind", "fact")
+        lines.append(f"- [{kind}] {predicate}: {value}")
+    return "\n".join(lines) if lines else "(start of conversation)"

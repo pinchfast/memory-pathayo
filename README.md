@@ -89,7 +89,7 @@ Use the raw key on subsequent calls:
 ```shell
 curl -H "X-API-Key: pfm_..." -H "Content-Type: application/json" \
   -d '{"message":"I will ship the auth module by Friday","speaker":"Dave","speaker_role":"engineer"}' \
-  http://localhost:8000/memory/ingest
+  http://localhost:8001/memory/ingest
 ```
 
 ## Project layout
