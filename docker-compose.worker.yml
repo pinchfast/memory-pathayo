@@ -1,0 +1,40 @@
+# docker-compose for Compute Engine e2-micro (always-on)
+# Runs only FalkorDB + SAQ worker — the API runs on Cloud Run
+#
+# Deploy:
+#   docker compose -f docker-compose.worker.yml up -d
+#
+# Env vars needed (set in .env or environment):
+#   DATABASE_URI=postgres://user:pass@neon-host/kgmemory
+#   REDIS_URL=redis://upstash-host:6379
+#   FALKORDB_HOST=falkordb
+#   FALKORDB_PORT=6379
+
+services:
+  falkordb:
+    image: falkordb/falkordb:latest
+    ports:
+      - "6379:6379"
+    volumes:
+      - falkordb_data:/data
+    restart: always
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    build: .
+    command: python -m saq kgmemory.worker.settings --web
+    env_file: .env
+    environment:
+      FALKORDB_HOST: falkordb
+      FALKORDB_PORT: 6379
+    depends_on:
+      falkordb:
+        condition: service_healthy
+    restart: always
+
+volumes:
+  falkordb_data:
